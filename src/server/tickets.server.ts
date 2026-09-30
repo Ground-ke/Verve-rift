@@ -6,9 +6,7 @@ import {
 } from "./crypto";
 import { sendTicketConfirmationEmail, sendRecoveryEmail, getSiteBaseUrl } from "./email.server";
 import { OrderService } from "./order-service";
-import { isCloudSqlConfigured } from "../db/index.ts";
-import { insertTickets, updateTicketStatus } from "../db/tickets.ts";
-import { PersistentStore } from "./persistent-store";
+import { ManualOrderStore } from "./manual-order-store";
 
 export interface DigitalTicketRecord {
   id: string;
@@ -20,13 +18,13 @@ export interface DigitalTicketRecord {
   tierName: string;
   admitsCount: number;
   attendeeName: string;
-  buyerEmail?: string;
+  buyerEmail?: string | undefined;
   buyerPhone: string;
   status: "valid" | "used" | "cancelled" | "refunded";
   priceKes: number;
   issuedAt: string;
-  usedAt?: string | null;
-  scannedBy?: string | null;
+  usedAt?: string | null | undefined;
+  scannedBy?: string | null | undefined;
   venue: {
     name: string;
     address: string;
@@ -44,11 +42,11 @@ export interface PaymentTransactionRecord {
   amountKes: number;
   currency: string;
   provider: string;
-  providerRef?: string;
+  providerRef?: string | undefined;
   status: "pending" | "completed" | "failed";
   createdAt: number;
   updatedAt: number;
-  errorMessage?: string;
+  errorMessage?: string | undefined;
 }
 
 export interface RecoveryRateLimitRecord {
@@ -67,12 +65,9 @@ export interface CheckInLogRecord {
   scannedAt: string;
   scannedBy: string;
   gateLocation: string;
-  ipAddress?: string;
+  ipAddress?: string | undefined;
 }
 
-// Persistent Authoritative Store (survives container restarts and deployments)
-const ticketsStore = PersistentStore.loadTickets();
-const transactionsStore = new Map<string, PaymentTransactionRecord>();
 const checkInLogsStore: CheckInLogRecord[] = [];
 const recoveryRateLimitStore: RecoveryRateLimitRecord[] = [];
 
@@ -81,16 +76,20 @@ export class TicketsServerService {
   /**
    * Returns all tickets currently in store
    */
-  static getAllTickets(): DigitalTicketRecord[] {
-    return Array.from(ticketsStore.values());
+  static getAllTickets(): Promise<DigitalTicketRecord[]> {
+    return ManualOrderStore.getTickets();
   }
 
   /**
    * Updates a ticket record in store
    */
-  static updateTicketRecord(ticket: DigitalTicketRecord): void {
-    ticketsStore.set(ticket.ticketNumber, ticket);
-    PersistentStore.saveTickets(ticketsStore);
+  static async updateTicketRecord(ticket: DigitalTicketRecord): Promise<void> {
+    await ManualOrderStore.updateTicket(ticket);
+  }
+
+  static _resetStoresForTesting(): void {
+    checkInLogsStore.length = 0;
+    recoveryRateLimitStore.length = 0;
   }
   /**
    * Issues cryptographic digital tickets for a completed order
@@ -99,17 +98,18 @@ export class TicketsServerService {
     orderId: string,
     token: string,
   ): Promise<DigitalTicketRecord[]> {
-    const order = OrderService.getOrder(orderId, token);
+    const order = await OrderService.getOrder(orderId, token);
     if (!order) {
       throw new Error("Order not found or unauthorized token.");
     }
-
-    // Check if tickets were already issued for this order
-    const existing = Array.from(ticketsStore.values()).filter((t) => t.orderId === orderId);
-    if (existing.length > 0) {
-      return existing;
+    if (
+      (order.status !== "paid" && order.status !== "approved" && order.status !== "completed") ||
+      !order.mpesaCode
+    ) {
+      throw new Error("Tickets can only be issued after payment has been verified.");
     }
 
+    // Check if tickets were already issued for this order
     const issuedTickets: DigitalTicketRecord[] = [];
     const admitsPerTicket = order.admitsCount;
     const quantity = order.quantity;
@@ -134,61 +134,31 @@ export class TicketsServerService {
         priceKes: Math.round(order.totalKes / quantity),
         issuedAt: new Date().toISOString(),
         venue: {
-          name: "Top Cliff Lounge",
-          address: "Nakuru-Nairobi Highway, Free Area",
+            name: "The Lawns Restaurant",
+            address: "Oyster-Shell Rd, opposite Sarova Woodlands",
           city: "Nakuru, Kenya",
           date: "Saturday, 31 October 2026",
-          time: "4:00 PM - 4:00 AM EAT",
-          ageRequirement: "Strictly 21+ with Valid ID",
+            time: "4 PM till late",
+            ageRequirement: "18+",
         },
       };
 
-      ticketsStore.set(ticketNumber, ticketRecord);
       issuedTickets.push(ticketRecord);
     }
 
-    // Persist all newly issued tickets to disk immediately
-    PersistentStore.saveTickets(ticketsStore);
-
-    if (isCloudSqlConfigured() && issuedTickets.length > 0) {
-      insertTickets(
-        issuedTickets.map((t) => ({
-          ticketNumber: t.ticketNumber,
-          orderId: t.orderId,
-          orderNumber: t.orderNumber,
-          attendeeName: t.attendeeName,
-          attendeeEmail: t.buyerEmail || null,
-          buyerPhone: t.buyerPhone,
-          tierSlug: t.tierSlug,
-          tierName: t.tierName,
-          admitsCount: t.admitsCount,
-          priceKes: t.priceKes,
-          qrHash: t.qrHash,
-          status: t.status,
-        })),
-      ).catch((err) => {
-        console.warn("Cloud SQL tickets sync notice:", err);
-      });
-    }
-
-    return issuedTickets;
+    return ManualOrderStore.issueTickets(orderId, ["approved", "paid", "completed"], issuedTickets);
   }
 
   /**
    * Issue authoritative tickets for an approved order without requiring customer token (Admin context)
    */
   static async issueTicketsForApprovedOrder(orderId: string): Promise<DigitalTicketRecord[]> {
+    const order = await OrderService._getOrderByIdInternal(orderId);
+    if (!order || order.status !== "approved" || !order.mpesaCode) {
+      throw new Error("Tickets can only be issued for an approved order.");
+    }
+
     // Check if tickets were already issued for this order
-    const existing = Array.from(ticketsStore.values()).filter((t) => t.orderId === orderId);
-    if (existing.length > 0) {
-      return existing;
-    }
-
-    const order = OrderService._getOrderByIdInternal(orderId);
-    if (!order) {
-      throw new Error("Order record not found in system.");
-    }
-
     const issuedTickets: DigitalTicketRecord[] = [];
     const admitsPerTicket = order.admitsCount || 1;
     const quantity = order.quantity || 1;
@@ -213,44 +183,19 @@ export class TicketsServerService {
         priceKes: Math.round(order.totalKes / quantity),
         issuedAt: new Date().toISOString(),
         venue: {
-          name: "Top Cliff Lounge",
-          address: "Nakuru-Nairobi Highway, Free Area",
+            name: "The Lawns Restaurant",
+            address: "Oyster-Shell Rd, opposite Sarova Woodlands",
           city: "Nakuru, Kenya",
           date: "Saturday, 31 October 2026",
-          time: "4:00 PM - 4:00 AM EAT",
-          ageRequirement: "Strictly 21+ with Valid ID",
+            time: "4 PM till late",
+            ageRequirement: "18+",
         },
       };
 
-      ticketsStore.set(ticketNumber, ticketRecord);
       issuedTickets.push(ticketRecord);
     }
 
-    // Persist all newly issued tickets to disk immediately
-    PersistentStore.saveTickets(ticketsStore);
-
-    if (isCloudSqlConfigured() && issuedTickets.length > 0) {
-      insertTickets(
-        issuedTickets.map((t) => ({
-          ticketNumber: t.ticketNumber,
-          orderId: t.orderId,
-          orderNumber: t.orderNumber,
-          attendeeName: t.attendeeName,
-          attendeeEmail: t.buyerEmail || null,
-          buyerPhone: t.buyerPhone,
-          tierSlug: t.tierSlug,
-          tierName: t.tierName,
-          admitsCount: t.admitsCount,
-          priceKes: t.priceKes,
-          qrHash: t.qrHash,
-          status: t.status,
-        })),
-      ).catch((err) => {
-        console.warn("Cloud SQL tickets sync notice:", err);
-      });
-    }
-
-    return issuedTickets;
+    return ManualOrderStore.issueTickets(orderId, ["approved"], issuedTickets);
   }
 
   /**
@@ -260,17 +205,16 @@ export class TicketsServerService {
     idempotencyKey: string;
     orderId: string;
     token: string;
-    mpesaReceipt?: string;
-    clientIp?: string;
+    clientIp?: string | undefined;
   }): Promise<{
     success: boolean;
     status: "completed" | "pending" | "failed";
-    code?: string;
+    code?: string | undefined;
     message: string;
-    tickets?: DigitalTicketRecord[];
-    receipt?: string;
+    tickets?: DigitalTicketRecord[] | undefined;
+    receipt?: string | undefined;
   }> {
-    const { idempotencyKey, orderId, token, mpesaReceipt } = params;
+    const { idempotencyKey, orderId, token } = params;
 
     if (!idempotencyKey || !orderId || !token) {
       return {
@@ -281,20 +225,70 @@ export class TicketsServerService {
       };
     }
 
+    // Authorize the order before looking up an idempotency key to prevent replay leaks.
+    let order: Awaited<ReturnType<typeof OrderService.getOrder>>;
+    try {
+      order = await OrderService.getOrder(orderId, token);
+    } catch (error) {
+      console.error("Could not read order from shared storage:", error);
+      return {
+        success: false,
+        status: "failed",
+        code: "STORAGE_UNAVAILABLE",
+        message: "Shared ticket storage is unavailable. No tickets were issued.",
+      };
+    }
+    if (!order) {
+      return {
+        success: false,
+        status: "failed",
+        code: "ORDER_NOT_FOUND",
+        message: "Order not found or authorization token invalid.",
+      };
+    }
+    if (
+      (order.status !== "paid" && order.status !== "approved" && order.status !== "completed") ||
+      !order.mpesaCode
+    ) {
+      return {
+        success: false,
+        status: "failed",
+        code: "PAYMENT_NOT_VERIFIED",
+        message: "Tickets are issued only after an organizer verifies the payment.",
+      };
+    }
+
     // 1. Check existing transaction under this idempotency key
-    const existingTx = transactionsStore.get(idempotencyKey);
+    let existingTx: PaymentTransactionRecord | undefined;
+    try {
+      existingTx = await ManualOrderStore.getIssuanceKey(idempotencyKey);
+    } catch (error) {
+      console.error("Could not read issuance idempotency record:", error);
+      return {
+        success: false,
+        status: "failed",
+        code: "STORAGE_UNAVAILABLE",
+        message: "Shared ticket storage is unavailable. No tickets were issued.",
+      };
+    }
     if (existingTx) {
+      if (existingTx.orderId !== orderId) {
+        return {
+          success: false,
+          status: "failed",
+          code: "IDEMPOTENCY_CONFLICT",
+          message: "This idempotency key belongs to a different order.",
+        };
+      }
       if (existingTx.status === "completed") {
         // Replay completed transaction results
-        const existingTickets = Array.from(ticketsStore.values()).filter(
-          (t) => t.orderId === orderId,
-        );
+        const existingTickets = await ManualOrderStore.getTicketsForOrder(orderId);
         return {
           success: true,
           status: "completed",
           message: "Transaction previously completed.",
           tickets: existingTickets,
-          receipt: existingTx.providerRef || mpesaReceipt,
+          receipt: existingTx.providerRef,
         };
       }
 
@@ -311,17 +305,6 @@ export class TicketsServerService {
       // If existing status is 'failed', we allow retrying under the same key or updating status
     }
 
-    // 2. Lookup order
-    const order = OrderService.getOrder(orderId, token);
-    if (!order) {
-      return {
-        success: false,
-        status: "failed",
-        code: "ORDER_NOT_FOUND",
-        message: "Order not found or authorization token invalid.",
-      };
-    }
-
     // 3. Mark transaction as pending
     const txRecord: PaymentTransactionRecord = {
       id: `tx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -330,21 +313,20 @@ export class TicketsServerService {
       amountKes: order.totalKes,
       currency: "KES",
       provider: "mpesa",
-      providerRef: mpesaReceipt || `REC-${Date.now().toString(36).toUpperCase()}`,
+      providerRef: order.mpesaCode,
       status: "pending",
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
-    transactionsStore.set(idempotencyKey, txRecord);
-
     try {
+      await ManualOrderStore.recordIssuanceKey(txRecord);
       // 4. Issue tickets upon successful verification
       const tickets = await this.issueTicketsForOrder(orderId, token);
 
       // 5. Mark transaction completed
       txRecord.status = "completed";
       txRecord.updatedAt = Date.now();
-      transactionsStore.set(idempotencyKey, txRecord);
+      await ManualOrderStore.recordIssuanceKey(txRecord);
 
       // 6. Automatically dispatch confirmation email with ticket pass attached to buyer
       if (order.buyerEmail) {
@@ -380,7 +362,9 @@ export class TicketsServerService {
       txRecord.status = "failed";
       txRecord.errorMessage = err instanceof Error ? err.message : String(err);
       txRecord.updatedAt = Date.now();
-      transactionsStore.set(idempotencyKey, txRecord);
+      await ManualOrderStore.recordIssuanceKey(txRecord).catch((storageError) => {
+        console.error("Could not persist failed issuance state:", storageError);
+      });
 
       return {
         success: false,
@@ -394,13 +378,13 @@ export class TicketsServerService {
   /**
    * Signature-verified public lookup by ticket code
    */
-  static getTicketByCode(code: string): {
+  static async getTicketByCode(code: string): Promise<{
     success: boolean;
-    ticket?: DigitalTicketRecord;
-    message?: string;
-  } {
+    ticket?: DigitalTicketRecord | undefined;
+    message?: string | undefined;
+  }> {
     const normalized = code.trim().toUpperCase();
-    const ticket = ticketsStore.get(normalized);
+    const ticket = await ManualOrderStore.getTicket(normalized);
 
     if (!ticket) {
       return {
@@ -419,26 +403,23 @@ export class TicketsServerService {
    * Ticket Recovery Request Handler (Rate limited + generic non-enumerating response)
    */
   static async recoverTicket(params: {
-    email?: string;
-    phone?: string;
+    email?: string | undefined;
+    phone?: string | undefined;
     clientIp: string;
     baseUrl: string;
   }): Promise<{
     success: boolean;
-    code?: string;
+    code?: string | undefined;
     message: string;
-    rateLimited?: boolean;
-    previewToken?: string; // Provided for sandbox UI convenience
+    rateLimited?: boolean | undefined;
+    previewToken?: string | undefined; // Provided for sandbox UI convenience
   }> {
     const { email, clientIp, baseUrl } = params;
     const now = Date.now();
     const ONE_HOUR = 3600000;
 
     // Clean up old rate limit records
-    while (
-      recoveryRateLimitStore.length > 0 &&
-      recoveryRateLimitStore[0].timestamp < now - ONE_HOUR
-    ) {
+    while (recoveryRateLimitStore[0] && recoveryRateLimitStore[0].timestamp < now - ONE_HOUR) {
       recoveryRateLimitStore.shift();
     }
 
@@ -470,7 +451,7 @@ export class TicketsServerService {
     // Look for matching tickets (generic non-enumerating response)
     let matchingTickets: DigitalTicketRecord[] = [];
     if (emailKey) {
-      matchingTickets = Array.from(ticketsStore.values()).filter((t) =>
+      matchingTickets = (await ManualOrderStore.getTickets()).filter((t) =>
         t.buyerEmail ? t.buyerEmail.toLowerCase() === emailKey : true,
       );
     }
@@ -499,12 +480,12 @@ export class TicketsServerService {
   /**
    * Verifies signed recovery token and retrieves associated tickets
    */
-  static verifyRecoveryToken(token: string): {
+  static async verifyRecoveryToken(token: string): Promise<{
     valid: boolean;
-    expired?: boolean;
-    email?: string;
+    expired?: boolean | undefined;
+    email?: string | undefined;
     tickets: DigitalTicketRecord[];
-  } {
+  }> {
     const result = verifyRecoveryToken(token);
     if (!result.valid || !result.email) {
       return {
@@ -516,7 +497,7 @@ export class TicketsServerService {
     }
 
     const email = result.email.toLowerCase();
-    const userTickets = Array.from(ticketsStore.values()).filter(
+    const userTickets = (await ManualOrderStore.getTickets()).filter(
       (t) => !t.buyerEmail || t.buyerEmail.toLowerCase() === email,
     );
 
@@ -530,17 +511,17 @@ export class TicketsServerService {
   /**
    * Scans and marks ticket as used at event check-in
    */
-  static markTicketUsed(
+  static async markTicketUsed(
     code: string,
     scannedBy = "Gate Security Staff",
-  ): {
+  ): Promise<{
     success: boolean;
     status: "valid" | "already_used" | "not_found";
-    ticket?: DigitalTicketRecord;
+    ticket?: DigitalTicketRecord | undefined;
     message: string;
-  } {
+  }> {
     const normalized = code.trim().toUpperCase();
-    const ticket = ticketsStore.get(normalized);
+    const ticket = await ManualOrderStore.getTicket(normalized);
 
     if (!ticket) {
       return {
@@ -559,17 +540,21 @@ export class TicketsServerService {
       };
     }
 
-    ticket.status = "used";
-    ticket.usedAt = new Date().toISOString();
-    ticket.scannedBy = scannedBy;
-    ticketsStore.set(normalized, ticket);
-    PersistentStore.saveTickets(ticketsStore);
-
-    if (isCloudSqlConfigured()) {
-      updateTicketStatus(normalized, "used", scannedBy).catch((err) => {
-        console.warn("Cloud SQL ticket scan status notice:", err);
-      });
+    const updatedTicket = await ManualOrderStore.markTicketUsed(
+      normalized,
+      scannedBy,
+      new Date().toISOString(),
+    );
+    if (!updatedTicket) {
+      const current = await ManualOrderStore.getTicket(normalized);
+      return {
+        success: false,
+        status: current?.status === "used" ? "already_used" : "not_found",
+        ticket: current,
+        message: current?.status === "used" ? "Ticket has already been checked in." : "Invalid ticket QR code.",
+      };
     }
+    Object.assign(ticket, updatedTicket);
 
     return {
       success: true,
@@ -585,17 +570,17 @@ export class TicketsServerService {
    */
   static async validateAndCheckinTicket(params: {
     ticket_code: string;
-    qr_hash?: string;
-    event_id?: string;
-    staff_name?: string;
-    gate_location?: string;
-    clientIp?: string;
+    qr_hash?: string | undefined;
+    event_id?: string | undefined;
+    staff_name?: string | undefined;
+    gate_location?: string | undefined;
+    clientIp?: string | undefined;
   }): Promise<{
     success: boolean;
     status: "valid" | "already_used" | "invalid_signature" | "invalid_pass" | "not_found";
     httpStatus: number;
     message: string;
-    ticket?: DigitalTicketRecord;
+    ticket?: DigitalTicketRecord | undefined;
     attendee?: {
       name: string;
       tier: string;
@@ -625,9 +610,9 @@ export class TicketsServerService {
       clientIp,
     } = params;
     const normalized = ticket_code.trim().toUpperCase();
-    const ticket = ticketsStore.get(normalized);
+    const ticket = await ManualOrderStore.getTicket(normalized);
 
-    const allTickets = Array.from(ticketsStore.values());
+    const allTickets = await ManualOrderStore.getTickets();
     const totalIssued = allTickets.length;
     const checkedInCount = allTickets.filter((t) => t.status === "used").length;
     const remainingValid = allTickets.filter((t) => t.status === "valid").length;
@@ -748,10 +733,19 @@ export class TicketsServerService {
 
     // 5. Valid Pass: Atomically mark as used
     const nowIso = new Date().toISOString();
-    ticket.status = "used";
-    ticket.usedAt = nowIso;
-    ticket.scannedBy = staff_name;
-    ticketsStore.set(normalized, ticket);
+    const updatedTicket = await ManualOrderStore.markTicketUsed(normalized, staff_name, nowIso);
+    if (!updatedTicket) {
+      const current = await ManualOrderStore.getTicket(normalized);
+      return {
+        success: false,
+        status: current?.status === "used" ? "already_used" : "not_found",
+        httpStatus: current?.status === "used" ? 409 : 404,
+        message: current?.status === "used" ? "Ticket was checked in by another scanner." : "Ticket record is unavailable.",
+        ticket: current,
+        eventStats,
+      };
+    }
+    Object.assign(ticket, updatedTicket);
 
     // Record check in log
     const logRecord: CheckInLogRecord = {
@@ -808,14 +802,14 @@ export class TicketsServerService {
   /**
    * Get Live Check-in Statistics & Recent Scan Stream
    */
-  static getCheckinStats(): {
+  static async getCheckinStats(): Promise<{
     totalIssued: number;
     checkedInCount: number;
     remainingValid: number;
     admittedPercentage: number;
     recentScans: CheckInLogRecord[];
-  } {
-    const allTickets = Array.from(ticketsStore.values());
+  }> {
+    const allTickets = await ManualOrderStore.getTickets();
     const totalIssued = allTickets.length;
     const checkedInCount = allTickets.filter((t) => t.status === "used").length;
     const remainingValid = allTickets.filter((t) => t.status === "valid").length;

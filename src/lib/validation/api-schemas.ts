@@ -14,7 +14,7 @@ export const validateTicketSchema = z.object({
   qr_hash: z.string().optional(),
   event_id: z.string().default("hauntings-of-the-rift-2026"),
   staff_name: z.string().max(100).default("Gate Security Staff"),
-  gate_location: z.string().max(100).default("Main Top Cliff Entrance"),
+  gate_location: z.string().max(100).default("Main Entrance"),
 });
 
 // 2. Order Creation Schema

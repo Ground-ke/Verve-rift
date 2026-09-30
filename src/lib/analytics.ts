@@ -94,7 +94,7 @@ class AnalyticsService {
     this.trackEvent("view_event", {
       event_id: eventId,
       event_name: eventName,
-      location: "Top Cliff Lounge, Nakuru",
+      location: "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru",
       date: "2026-10-31",
     });
   }

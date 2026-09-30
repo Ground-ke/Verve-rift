@@ -31,12 +31,6 @@ import { Badge } from "@/components/ui/badge";
 import { validateAndNormalizeKenyanPhone } from "@/lib/validation/phone";
 import type { ClientOrderResponse } from "@/server/order-service";
 import { VerveBackButton, VerveIcon, VerveLogo } from "@/components/brand/verve-logo";
-import {
-  saveOrderToFirestore,
-  submitMpesaCodeToFirestore,
-  subscribeToOrder,
-  type FirestoreOrder,
-} from "@/lib/firebase/firestore-service";
 import { toast } from "sonner";
 import { useFaviconLoading } from "@/lib/dynamic-favicon";
 
@@ -46,6 +40,14 @@ const searchSchema = z.object({
   orderId: z.string().optional().catch(undefined),
   token: z.string().optional().catch(undefined),
 });
+
+const mpesaPaymentDetails = {
+  paybill: import.meta.env["VITE_MPESA_PAYBILL"]?.trim() || "",
+  account: import.meta.env["VITE_MPESA_ACCOUNT"]?.trim() || "",
+  accountName: import.meta.env["VITE_MPESA_ACCOUNT_NAME"]?.trim() || "",
+};
+
+const isMpesaPaymentConfigured = Object.values(mpesaPaymentDetails).every(Boolean);
 
 export const Route = createFileRoute("/checkout")({
   validateSearch: searchSchema,
@@ -91,7 +93,7 @@ const options: TicketOption[] = [
   {
     id: "group-of-four",
     name: "Group of Four",
-    price: 3200,
+    price: 3600,
     admitsCount: 4,
     description: "Admits 4 guests together (1 QR bundle)",
   },
@@ -235,69 +237,93 @@ function Checkout() {
     return () => clearInterval(interval);
   }, [step, activeOrder, paymentPhase]);
 
-  // Production-Ready: Real-Time Firestore Synchronization & Zero Local-Storage Rehydration
+  const hasActiveOrder = Boolean(activeOrder);
+  const hasSubmittedCode = Boolean(submittedCode);
+
+  // Refresh the authoritative server order so this page can recover after reloads.
   useEffect(() => {
     const currentOrderId = activeOrder?.orderId || routeOrderId;
-    if (!currentOrderId) return;
+    const checkoutToken = activeOrder?.checkoutToken || routeToken;
+    if (!currentOrderId || !checkoutToken) return;
 
-    const unsubscribe = subscribeToOrder(currentOrderId, (order) => {
-      if (!order) return;
-
-      // If activeOrder not in React state (e.g. customer reloaded or reopened page), rehydrate from Firestore
-      if (!activeOrder) {
-        setActiveOrder({
-          success: true,
-          orderId: order.orderId,
-          orderNumber: order.orderNumber,
-          checkoutToken: routeToken || "",
-          eventId: "hauntings-2026",
-          ticketTypeId: order.ticketTypeId,
-          ticketName: order.ticketName,
-          admitsCount: order.admitsCount,
-          quantity: order.quantity,
-          unitPriceKes: Math.round(order.totalKes / order.quantity),
-          discountKes: 0,
-          subtotalKes: order.totalKes,
-          totalKes: order.totalKes,
-          currency: "KES",
-          buyerName: order.customerName,
-          buyerPhone: order.customerPhone,
-          buyerEmail: order.customerEmail,
-          status: order.status as ClientOrderResponse["status"],
-          mpesaCode: order.mpesaCode,
-          mpesaMessage: order.mpesaMessage,
-          rejectionReason: order.rejectionReason,
-          approvedBy: order.approvedBy,
-          approvedAt: order.approvedAt,
-          expiresAt: new Date(Date.now() + 600 * 1000).toISOString(),
-          ttlSeconds: 600,
-        });
-
-        if (order.customerEmail && !buyerEmail) setBuyerEmail(order.customerEmail);
-        if (order.mpesaCode && !submittedCode) setSubmittedCode(order.mpesaCode);
-        setStep("payment");
-      }
-
-      // React to status transitions triggered by Admin verification
-      if (order.status === "approved" || order.status === "completed") {
-        setPaymentPhase("paid");
-        setMpesaReceipt(order.mpesaCode || "APPROVED");
-        toast.success("Payment verified! Your tickets have been issued and emailed.");
-      } else if (order.status === "rejected") {
-        setPaymentPhase("failed");
-        setPaymentError(
-          order.rejectionReason ||
-            "Your M-Pesa transaction code could not be verified by the admin.",
+    let isRefreshing = false;
+    let disposed = false;
+    const refreshOrder = async () => {
+      if (isRefreshing || disposed) return;
+      isRefreshing = true;
+      try {
+        const query = new URLSearchParams({ token: checkoutToken });
+        const response = await fetch(
+          `/api/orders/${encodeURIComponent(currentOrderId)}?${query.toString()}`,
         );
-        toast.error("M-Pesa payment rejected. Please check details and retry.");
-      } else if (order.status === "pending_approval") {
-        setPaymentPhase("pending_approval");
-        if (order.mpesaCode) setSubmittedCode(order.mpesaCode);
-      }
-    });
+        if (!response.ok) {
+          if (!hasActiveOrder) {
+            setErrorMessage("Order not found or this checkout link is no longer valid.");
+          }
+          return;
+        }
 
-    return () => unsubscribe();
-  }, [activeOrder?.orderId, routeOrderId, routeToken, buyerEmail, submittedCode, activeOrder]);
+        const currentOrder = (await response.json()) as ClientOrderResponse;
+        if (!currentOrder.success) return;
+        if (!hasActiveOrder) {
+          setActiveOrder(currentOrder);
+          setBuyerName(currentOrder.buyerName);
+          setBuyerEmail(currentOrder.buyerEmail || "");
+          setStep("payment");
+        }
+        if (currentOrder.mpesaCode && !hasSubmittedCode) setSubmittedCode(currentOrder.mpesaCode);
+
+        if (
+          currentOrder.status === "approved" ||
+          currentOrder.status === "paid" ||
+          currentOrder.status === "completed"
+        ) {
+          const verification = await fetch("/api/pay/verify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              idempotency_key: `${currentOrder.orderId}:ticket-issue`,
+              order_id: currentOrder.orderId,
+              checkout_token: checkoutToken,
+            }),
+          });
+          const result = await verification.json();
+          if (
+            verification.ok &&
+            result.success &&
+            Array.isArray(result.tickets) &&
+            result.tickets.length > 0
+          ) {
+            setPaymentPhase("paid");
+            setMpesaReceipt(currentOrder.mpesaCode || null);
+          }
+        } else if (currentOrder.status === "rejected") {
+          setPaymentPhase("failed");
+          setPaymentError(currentOrder.rejectionReason || "The organizer rejected this payment claim.");
+        } else if (currentOrder.status === "pending_approval") {
+          setPaymentPhase("pending_approval");
+        }
+      } catch (error) {
+        console.error("Could not refresh the order from the server:", error);
+      } finally {
+        isRefreshing = false;
+      }
+    };
+
+    void refreshOrder();
+    const interval = window.setInterval(() => void refreshOrder(), 10_000);
+    return () => {
+      disposed = true;
+      window.clearInterval(interval);
+    };
+  }, [
+    activeOrder?.orderId,
+    activeOrder?.checkoutToken,
+    hasActiveOrder,
+    hasSubmittedCode,
+    routeOrderId,
+    routeToken,
+  ]);
 
   // Handle Order Creation / Reservation
   const handleCreateReservation = async () => {
@@ -319,6 +345,13 @@ function Checkout() {
     if (!buyerEmail.trim() || !buyerEmail.includes("@") || !buyerEmail.includes(".")) {
       setErrorMessage(
         "Please enter a valid delivery email address where your tickets will be sent.",
+      );
+      return;
+    }
+
+    if (!isMpesaPaymentConfigured) {
+      setErrorMessage(
+        "Online payment is not available yet. The organizer has not configured verified M-Pesa payment details.",
       );
       return;
     }
@@ -345,55 +378,29 @@ function Checkout() {
           signal: controller.signal,
         });
         clearTimeout(timeoutId);
-        if (response.ok) {
-          data = await response.json();
+        const responseData = (await response.json()) as ClientOrderResponse & {
+          message?: string;
+        };
+        if (!response.ok || !responseData.success) {
+          setErrorMessage(
+            responseData.message || "We couldn't reserve these tickets. Please try again.",
+          );
+          return;
         }
+        data = responseData;
       } catch (fetchErr) {
         clearTimeout(timeoutId);
-        console.warn("Backend order creation fallback activated:", fetchErr);
+        console.error("Order reservation request failed:", fetchErr);
+        setErrorMessage("We couldn't reach the ticket reservation service. Please try again.");
+        return;
       }
 
-      // Robust fallback if serverless API route is delayed or unreachable
-      if (!data || !data.success) {
-        const randomSuffix = Math.floor(100000 + Math.random() * 900000);
-        const orderId = `order_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-        data = {
-          success: true,
-          orderId,
-          orderNumber: `HRT-2026-${randomSuffix}`,
-          checkoutToken: `tok_${Math.random().toString(36).substring(2)}`,
-          ticketTypeId: choice.id,
-          ticketName: choice.name,
-          quantity,
-          admitsCount: choice.admitsCount,
-          totalKes: choice.priceKes * quantity,
-          buyerName: buyerName.trim(),
-          buyerPhone: phoneValidation.normalized,
-          buyerEmail: buyerEmail.trim().toLowerCase(),
-          status: "pending",
-          expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
-          ttlSeconds: 600,
-        };
+      if (!data) {
+        setErrorMessage("The ticket reservation service returned no order. Please try again.");
+        return;
       }
 
-      setActiveOrder(data as ClientOrderResponse);
-
-      // Non-blocking Firestore sync to prevent any UI delay
-      saveOrderToFirestore({
-        orderId: data.orderId,
-        orderNumber: data.orderNumber,
-        customerName: buyerName.trim(),
-        customerEmail: buyerEmail.trim().toLowerCase(),
-        customerPhone: phoneValidation.normalized,
-        ticketTypeId: choice.id,
-        ticketName: choice.name,
-        admitsCount: choice.admitsCount,
-        quantity,
-        totalKes: data.totalKes,
-        status: "pending",
-      }).catch((fErr) => {
-        console.debug("[Firestore] Order sync warning:", fErr);
-      });
+      setActiveOrder(data);
 
       // Update URL query parameters for session recovery without local storage
       navigate({
@@ -474,26 +481,6 @@ function Checkout() {
         setMpesaInputError(data.message || "Failed to submit M-Pesa code. Please try again.");
         setIsSubmittingMpesaCode(false);
         return;
-      }
-
-      // 2. Submit to Firestore to guarantee instant real-time reflection on Admin Dashboard
-      try {
-        await submitMpesaCodeToFirestore({
-          orderId: activeOrder.orderId,
-          orderNumber: activeOrder.orderNumber,
-          mpesaCode: codeToSubmit,
-          mpesaMessage: cleanInput,
-          customerEmail: buyerEmail.trim().toLowerCase(),
-          customerName: buyerName.trim(),
-          customerPhone: phoneValidation?.normalized || activeOrder.buyerPhone,
-          ticketTypeId: activeOrder.ticketTypeId,
-          ticketName: activeOrder.ticketName,
-          admitsCount: activeOrder.admitsCount,
-          quantity: activeOrder.quantity,
-          totalKes: activeOrder.totalKes,
-        });
-      } catch (fErr) {
-        console.debug("[Firestore] Sync note:", fErr);
       }
 
       setSubmittedCode(codeToSubmit);
@@ -1048,8 +1035,7 @@ function Checkout() {
                       </h2>
                       <p className="text-sm text-muted-foreground mt-1">
                         Use the Paybill details below to transfer the exact ticket amount, then
-                        paste your M-Pesa SMS or transaction code below to submit for instant
-                        verification.
+                        paste your M-Pesa SMS or transaction code below for organizer review.
                       </p>
                     </div>
 
@@ -1060,11 +1046,13 @@ function Checkout() {
                           Business No.
                         </span>
                         <div className="flex items-center justify-between mt-1">
-                          <span className="font-mono text-xl font-bold text-amber-300">522533</span>
+                          <span className="font-mono text-xl font-bold text-amber-300">
+                            {mpesaPaymentDetails.paybill}
+                          </span>
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleCopy("522533", "Business No")}
+                            onClick={() => handleCopy(mpesaPaymentDetails.paybill, "Business No")}
                             className="h-7 px-2 text-xs text-amber-300 hover:bg-amber-950/40"
                             title="Copy Business No"
                           >
@@ -1082,11 +1070,13 @@ function Checkout() {
                           Account No.
                         </span>
                         <div className="flex items-center justify-between mt-1">
-                          <span className="font-mono text-xl font-bold text-bone">8142205</span>
+                          <span className="font-mono text-xl font-bold text-bone">
+                            {mpesaPaymentDetails.account}
+                          </span>
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleCopy("8142205", "Account No")}
+                            onClick={() => handleCopy(mpesaPaymentDetails.account, "Account No")}
                             className="h-7 px-2 text-xs text-bone hover:bg-card"
                             title="Copy Account No"
                           >
@@ -1105,12 +1095,14 @@ function Checkout() {
                         </span>
                         <div className="flex items-center justify-between mt-1">
                           <span className="font-mono text-base font-bold text-emerald-300 truncate">
-                            vervenexus
+                            {mpesaPaymentDetails.accountName}
                           </span>
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleCopy("vervenexus", "Account Name")}
+                            onClick={() =>
+                              handleCopy(mpesaPaymentDetails.accountName, "Account Name")
+                            }
                             className="h-7 px-2 text-xs text-emerald-300 hover:bg-emerald-950/40"
                             title="Copy Account Name"
                           >
@@ -1161,15 +1153,21 @@ function Checkout() {
                         </li>
                         <li>
                           Enter Business Number:{" "}
-                          <strong className="text-amber-300 font-mono">522533</strong>
+                          <strong className="text-amber-300 font-mono">
+                            {mpesaPaymentDetails.paybill}
+                          </strong>
                         </li>
                         <li>
                           Enter Account Number:{" "}
-                          <strong className="text-bone font-mono">8142205</strong>
+                          <strong className="text-bone font-mono">
+                            {mpesaPaymentDetails.account}
+                          </strong>
                         </li>
                         <li>
                           Confirm payment name displays as:{" "}
-                          <strong className="text-emerald-400 font-mono">vervenexus</strong>
+                          <strong className="text-emerald-400 font-mono">
+                            {mpesaPaymentDetails.accountName}
+                          </strong>
                         </li>
                         <li>
                           Enter Amount:{" "}
@@ -1183,9 +1181,9 @@ function Checkout() {
                       <div className="pt-2 border-t border-amber-500/20 text-amber-300 flex items-start gap-2">
                         <Clock3 className="size-3.5 text-amber-400 shrink-0 mt-0.5" />
                         <span>
-                          <strong>Manual Processing SLA: Within 24 hours.</strong> Because tickets
-                          are verified manually by the admin, approval and email dispatch occurs
-                          within 24 hours of submission.
+                          <strong>Manual payment review.</strong> Submitting an M-Pesa message does
+                          not confirm payment; tickets are issued only after the organizer verifies
+                          the transaction.
                         </span>
                       </div>
                     </div>
@@ -1287,7 +1285,7 @@ function Checkout() {
                             variant="outline"
                             className="border-amber-500/40 text-amber-300 font-mono text-xs"
                           >
-                            Live Firestore Sync
+                            Organizer review required
                           </Badge>
                         </div>
                         <p className="text-sm text-bone-muted leading-relaxed">
@@ -1301,19 +1299,17 @@ function Checkout() {
                           <Clock3 className="size-4 text-amber-400 shrink-0 mt-0.5" />
                           <div>
                             <strong className="text-amber-300 font-mono uppercase tracking-wider block text-[11px]">
-                              Expected Processing Time: Within 24 Hours
+                              Awaiting organizer review
                             </strong>
                             <span>
-                              Tickets are audited manually by the admin against our official
-                              merchant statement. Your digital ticket and QR admission pass will be
-                              verified and dispatched within 24 hours.
+                              A submitted M-Pesa message is not confirmation of payment. A ticket
+                              is issued only after the organizer approves the payment.
                             </span>
                           </div>
                         </div>
                         <p className="text-xs text-amber-300 font-mono pt-1 flex items-center gap-1.5">
                           <Mail className="size-3.5" />
-                          Upon approval, your official admission pass will be delivered to:{" "}
-                          <strong className="text-bone">{buyerEmail}</strong>
+                          Tickets will appear here after the organizer approves the payment.
                         </p>
                       </div>
                     </div>
@@ -1321,11 +1317,11 @@ function Checkout() {
                     <div className="border border-amber-500/30 bg-card/80 p-4 text-xs font-mono text-muted-foreground space-y-2">
                       <div className="flex items-center gap-2 text-amber-400 font-semibold">
                         <RefreshCw className="size-4 animate-spin text-amber-400 shrink-0" />
-                        Listening to Central Verification Ledger
+                        Checking order status
                       </div>
                       <p>
-                        This screen updates automatically the instant the administrator verifies
-                        your payment. No page refresh is required.
+                        This page checks for status updates periodically. You can also refresh the
+                        status manually.
                       </p>
                     </div>
 
@@ -1351,7 +1347,7 @@ function Checkout() {
                   </div>
                 )}
 
-                {/* PAYMENT STATE 3: SUCCESS / APPROVED & TICKET EMAILED */}
+                {/* PAYMENT STATE 3: SUCCESS / APPROVED & TICKETS ISSUED */}
                 {paymentPhase === "paid" && (
                   <div className="border border-emerald-500/60 bg-emerald-950/30 p-6 sm:p-8 space-y-6">
                     <div className="flex items-start gap-4">
@@ -1362,31 +1358,32 @@ function Checkout() {
                         <h2 className="text-3xl font-display text-bone">
                           PAYMENT APPROVED &amp; TICKETS ISSUED
                         </h2>
-                        <p className="text-sm text-emerald-300 font-mono">
-                          M-Pesa Reference:{" "}
-                          <strong className="text-bone font-bold">
-                            {mpesaReceipt || submittedCode || "CONFIRMED"}
-                          </strong>
-                        </p>
+                        {(mpesaReceipt || submittedCode) && (
+                          <p className="text-sm text-emerald-300 font-mono">
+                            M-Pesa Reference:{" "}
+                            <strong className="text-bone font-bold">
+                              {mpesaReceipt || submittedCode}
+                            </strong>
+                          </p>
+                        )}
                         <p className="text-sm text-bone-muted pt-1">
                           Your payment of{" "}
                           <strong className="text-bone">
                             KES {activeOrder.totalKes.toLocaleString()}
                           </strong>{" "}
-                          has been verified by the event admin. Reserved tickets have been
-                          permanently committed to sold inventory.
+                          has been approved by the organizer. Tickets have been issued for this
+                          order.
                         </p>
                       </div>
                     </div>
 
                     <div className="border border-emerald-500/30 bg-emerald-950/40 p-4 text-xs text-bone-muted space-y-2">
                       <div className="flex items-center gap-2 text-emerald-400 font-semibold text-sm">
-                        <Mail className="size-4" /> Ticket Sent to Email
+                        <Ticket className="size-4" /> Tickets Available
                       </div>
                       <p>
-                        Your cryptographic admission ticket pass with QR token has been delivered to{" "}
-                        <strong className="text-bone font-mono">{buyerEmail}</strong>. You can also
-                        view and save your digital pass immediately below.
+                        Open the order link to view and save your issued tickets. Keep that link
+                        available for access.
                       </p>
                     </div>
 
@@ -1497,10 +1494,9 @@ function Checkout() {
                 : `Bundle for ${choice.admitsCount} guests`}
             </p>
             <div className="mt-4 space-y-1 text-sm text-muted-foreground border-y border-border/80 py-3">
-              <p>31 October 2026 · 4:00 PM</p>
-              <p>Top Cliff Lodge, Nakuru</p>
-              <p>Dress Code: Wickedly Fabulous</p>
-              <p>Age: 18+ Strictly</p>
+              <p>31 October 2026 · 4 PM till late</p>
+              <p>The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru</p>
+              <p>Age: 18+</p>
             </div>
 
             <div className="mt-4 space-y-2 text-sm">

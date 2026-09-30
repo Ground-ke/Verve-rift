@@ -108,8 +108,8 @@ export class AdminServerService {
   /**
    * Get Overall Event Overview Metrics
    */
-  static getOverviewMetrics() {
-    const tickets = TicketsServerService.getAllTickets();
+  static async getOverviewMetrics() {
+    const tickets = await TicketsServerService.getAllTickets();
     const promos = Array.from(promotionsStore.values());
     const scanners = Array.from(scannersStore.values());
 
@@ -142,15 +142,24 @@ export class AdminServerService {
       activeScannersCount: scanners.filter((s) => s.status === "active").length,
       recentTickets: tickets.slice(0, 5),
       recentAuditLogs: auditLogsStore.slice(0, 8),
-      hourlySalesTrend: this.getHourlySalesTrend(),
+      hourlySalesTrend: this.getHourlySalesTrendFromTickets(tickets),
     };
   }
 
   /**
    * Get Hourly Sales Trend derived from actual issued tickets
    */
-  static getHourlySalesTrend(): Array<{ hour: string; sales: number; count: number }> {
-    const tickets = TicketsServerService.getAllTickets().filter((t) => t.status !== "cancelled");
+  static async getHourlySalesTrend(): Promise<Array<{ hour: string; sales: number; count: number }>> {
+    const tickets = await TicketsServerService.getAllTickets();
+    return this.getHourlySalesTrendFromTickets(tickets);
+  }
+
+  private static getHourlySalesTrendFromTickets(tickets: DigitalTicketRecord[]): Array<{
+    hour: string;
+    sales: number;
+    count: number;
+  }> {
+    tickets = tickets.filter((t) => t.status !== "cancelled");
     if (tickets.length === 0) {
       return [];
     }
@@ -180,8 +189,9 @@ export class AdminServerService {
     search?: string;
     status?: string;
     tier?: string;
-  }): DigitalTicketRecord[] {
-    let tickets = TicketsServerService.getAllTickets().filter((t): t is DigitalTicketRecord =>
+  }): Promise<DigitalTicketRecord[]> {
+    return TicketsServerService.getAllTickets().then((storedTickets) => {
+      let tickets = storedTickets.filter((t): t is DigitalTicketRecord =>
       Boolean(
         t &&
         typeof t === "object" &&
@@ -189,7 +199,7 @@ export class AdminServerService {
         t.ticketNumber.trim().length > 0 &&
         t.attendeeName,
       ),
-    );
+      );
 
     if (filters?.status && filters.status !== "all") {
       tickets = tickets.filter((t) => t.status === filters.status);
@@ -212,10 +222,11 @@ export class AdminServerService {
     }
 
     // Sort newest issued first
-    return tickets.sort((a, b) => {
+      return tickets.sort((a, b) => {
       const timeB = b.issuedAt ? new Date(b.issuedAt).getTime() : 0;
       const timeA = a.issuedAt ? new Date(a.issuedAt).getTime() : 0;
       return timeB - timeA;
+      });
     });
   }
 
@@ -230,7 +241,8 @@ export class AdminServerService {
     clientIp?: string;
   }): Promise<{ success: boolean; message: string; ticket?: DigitalTicketRecord }> {
     const { code, reason, actorEmail, actorId, clientIp } = params;
-    const ticket = TicketsServerService.getTicketByCode(code);
+    const result = await TicketsServerService.getTicketByCode(code);
+    const ticket = result.ticket;
 
     if (!ticket) {
       return { success: false, message: "Ticket pass not found." };
@@ -242,7 +254,7 @@ export class AdminServerService {
 
     const previousStatus = ticket.status;
     ticket.status = "cancelled";
-    TicketsServerService.updateTicketRecord(ticket);
+    await TicketsServerService.updateTicketRecord(ticket);
 
     // Audit log
     await this.recordAuditLog({
@@ -278,7 +290,8 @@ export class AdminServerService {
     clientIp?: string;
   }): Promise<{ success: boolean; message: string }> {
     const { code, actorEmail, actorId, clientIp } = params;
-    const ticket = TicketsServerService.getTicketByCode(code);
+    const result = await TicketsServerService.getTicketByCode(code);
+    const ticket = result.ticket;
 
     if (!ticket) {
       return { success: false, message: "Ticket pass not found." };

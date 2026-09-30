@@ -1,13 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
-  ShieldCheck,
   FileText,
-  AlertTriangle,
-  MapPin,
-  Ticket,
-  Flame,
-  Ban,
-  CheckCircle2,
 } from "lucide-react";
 import { VerveIcon, VerveBackButton } from "@/components/brand/verve-logo";
 
@@ -18,13 +11,12 @@ export const Route = createFileRoute("/terms")({
       {
         name: "description",
         content:
-          "Official Event Terms and Ticketing Conditions for Hauntings of the Rift at Top Cliff Lodge, Nakuru (31 October 2026).",
+          "Ticketing information for Hauntings of the Rift at The Lawns Restaurant, Nakuru (31 October 2026).",
       },
       { property: "og:title", content: "Terms & Conditions — Hauntings of the Rift" },
       {
         property: "og:description",
-        content:
-          "Ticketing policies, gate admission, age limits, and venue regulations at Top Cliff Lodge.",
+        content: "Event details and ticket information for Hauntings of the Rift.",
       },
       { property: "og:type", content: "website" },
     ],
@@ -59,19 +51,17 @@ function TermsPage() {
         <div className="mx-auto max-w-4xl space-y-4">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-amber-500/40 bg-amber-950/40 text-amber-300 text-xs font-mono">
             <FileText className="size-3.5" />
-            Official Ticketing &amp; Admission Agreement
+            Ticketing Information
           </div>
           <h1 className="font-display text-3xl sm:text-5xl text-bone tracking-tight">
             Terms &amp; Conditions of Entry
           </h1>
           <p className="text-sm sm:text-base text-bone-muted max-w-2xl leading-relaxed">
-            Please read these terms carefully before acquiring passes for{" "}
-            <strong>Hauntings of the Rift</strong>. Possession of a pass signifies unconditional
-            acceptance of these operational rules.
+            Confirmed event and ticket information for <strong>Hauntings of the Rift</strong>.
+            Contact the organizer for any policy details not listed here.
           </p>
           <div className="text-xs font-mono text-muted-foreground pt-1">
-            Event Date: Saturday, 31 October 2026 · Venue: Top Cliff Lodge, Nakuru · Capacity: 800
-            Max
+            Event Date: Saturday, 31 October 2026 · Venue: The Lawns Restaurant, Nakuru · 18+
           </div>
         </div>
       </section>
@@ -85,9 +75,9 @@ function TermsPage() {
             Event Scope &amp; Organization
           </h2>
           <p>
-            <em>Hauntings of the Rift</em> is an immersive Halloween nightlife and costume festival
-            produced and managed exclusively by <strong>Verve &amp; Co.</strong> on 31 October 2026,
-            commencing at 4:00 PM EAT at Top Cliff Lodge, Nakuru, Kenya.
+            <em>Hauntings of the Rift</em> takes place on Saturday, 31 October 2026, from 4 PM till
+            late at <strong>The Lawns Restaurant</strong>, Oyster-Shell Rd, opposite Sarova
+            Woodlands, Nakuru, Kenya.
           </p>
         </section>
 
@@ -97,18 +87,10 @@ function TermsPage() {
             <span className="text-sm font-mono text-muted-foreground">02.</span>
             Age Restriction (Strictly 18+)
           </h2>
-          <div className="border border-amber-500/40 bg-amber-950/20 p-4 space-y-2">
-            <div className="flex items-center gap-2 text-amber-400 font-bold font-mono text-xs uppercase tracking-wider">
-              <AlertTriangle className="size-4" /> Mandatory Age Verification at Gate
-            </div>
-            <p className="text-xs text-bone-muted">
-              Admission is strictly restricted to patrons aged <strong>18 years and older</strong>.
-              All attendees must present an original government-issued National ID Card, Passport,
-              or valid Driver&apos;s License at the gate. Photocopies, digital photos, or expired
-              student cards will not be accepted. No refunds will be issued for denial of entry due
-              to underage status or missing identification.
-            </p>
-          </div>
+          <p className="text-xs text-bone-muted">
+            The event is for guests aged <strong>18 and older</strong>. Contact the organizer if you
+            need details about age verification or entry requirements before purchasing.
+          </p>
         </section>
 
         {/* Section 3: Ticketing, QR Passes & Gate Admission */}
@@ -119,25 +101,13 @@ function TermsPage() {
           </h2>
           <ul className="space-y-2.5 list-disc list-inside text-xs sm:text-sm text-bone-muted pl-2">
             <li>
-              <strong className="text-bone">Single-Entry QR Passes:</strong> Each digital pass
-              contains a verified cryptographic barcode. Once scanned by gate staff at Top Cliff
-              Lodge, the ticket status is irreversibly marked as <code>used</code>. Re-entry after
-              departure is at the discretion of head security.
+              <strong className="text-bone">Digital tickets:</strong> Keep your ticket available
+              for validation at the event and do not share its QR code.
             </li>
             <li>
               <strong className="text-bone">Admits Count:</strong> Each ticket tier admits strictly
-              the designated number of guests (Early Bird / General Admission: 1 guest; Couple Pass:
-              2 guests arriving together; Group of 5: 5 guests).
-            </li>
-            <li>
-              <strong className="text-bone">Anti-Scalping &amp; Unauthorized Resale:</strong> Passes
-              may only be purchased through our official portal. Tickets resold at inflated prices
-              or via unauthorized brokers will be voided without compensation.
-            </li>
-            <li>
-              <strong className="text-bone">Buyer Responsibility:</strong> Do not share screenshots
-              of your unredeemed QR code on social media. The first person to present the QR code at
-              the gate terminal will be granted entry.
+              the designated number of guests: Early Bird admits 1, Couple Pass admits 2, and Group
+              of Four admits 4.
             </li>
           </ul>
         </section>
@@ -146,17 +116,16 @@ function TermsPage() {
         <section className="space-y-3 border-t border-border/60 pt-8">
           <h2 className="font-display text-xl sm:text-2xl text-amber-300 flex items-center gap-2">
             <span className="text-sm font-mono text-muted-foreground">04.</span>
-            Payment Processing (Safaricom M-Pesa Paybill 522533)
+            Payment and Review
           </h2>
           <p>
-            Official ticket transactions are settled exclusively in Kenya Shillings (KES) through
-            direct Safaricom M-Pesa to Paybill <strong>522533</strong> (Account:{" "}
-            <code>RIFT-[ORDER]</code>).
+            Follow the M-Pesa payment instructions shown during checkout. Payment details can
+            change; verify the displayed recipient before sending money.
           </p>
           <p className="text-xs text-muted-foreground">
-            Upon submitting payment, buyers must enter their 10-character M-Pesa receipt code.
-            Orders are reconciled against the official merchant ledger before passes are minted and
-            dispatched.
+            After paying, paste the M-Pesa confirmation message or transaction code into your order.
+            A submitted message is a payment claim, not confirmation. The organizer reviews it
+            before a ticket is issued.
           </p>
         </section>
 
@@ -169,100 +138,57 @@ function TermsPage() {
           <div className="grid gap-3 sm:grid-cols-2 text-xs">
             <div className="border border-border/80 bg-card/60 p-4 space-y-1.5">
               <span className="font-mono text-amber-300 font-bold block">
-                Standard Policy: No Refunds
+                Refunds and Cancellations
               </span>
               <p className="text-muted-foreground">
-                All ticket sales are final. We do not provide refunds for changes of mind,
-                scheduling conflicts, transport delays, or refusal of entry due to violation of
-                venue conduct rules.
+                Refund, cancellation, and postponement arrangements have not been confirmed here.
+                Contact the organizer for the applicable policy before purchasing.
               </p>
             </div>
 
             <div className="border border-border/80 bg-card/60 p-4 space-y-1.5">
               <span className="font-mono text-amber-300 font-bold block">
-                Cancellation by Organizer
+                Organizer Cancellation
               </span>
               <p className="text-muted-foreground">
-                If the event is completely canceled by Verve &amp; Co. without a rescheduled date,
-                ticket holders will receive a full refund of face value to the originating M-Pesa
-                phone number.
+                Contact the organizer for information if the event is cancelled or postponed. No
+                refund or rescheduling outcome is promised on this page.
               </p>
             </div>
           </div>
           <p className="text-xs text-bone-muted">
-            In the event of severe weather or force majeure requiring postponement, all issued
-            tickets remain valid and transfer automatically to the rescheduled date.
+            For confirmed updates, use the organizer contact details below.
           </p>
         </section>
 
-        {/* Section 6: Top Cliff Lodge Venue Safety & Prohibited Items */}
+        {/* Section 6: Venue Information */}
         <section className="space-y-4 border-t border-border/60 pt-8">
           <h2 className="font-display text-xl sm:text-2xl text-amber-300 flex items-center gap-2">
             <span className="text-sm font-mono text-muted-foreground">06.</span>
-            Venue Safety &amp; Prohibited Items
+            Venue Information
           </h2>
           <p>
-            Top Cliff Lodge is located on elevated terrain overlooking the Rift Valley. Attendees
-            must observe personal safety and follow all perimeter signage and security guard
-            directions:
+            The venue is The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru.
+            Contact the organizer for venue access and safety information.
           </p>
 
-          <div className="border border-red-500/30 bg-red-950/20 p-4 space-y-2 text-xs">
-            <div className="flex items-center gap-2 text-red-400 font-bold font-mono uppercase tracking-wider">
-              <Ban className="size-4" /> Strictly Prohibited Items
-            </div>
-            <ul className="list-disc list-inside text-bone-muted space-y-1 pl-1">
-              <li>Outside alcohol, glass bottles, metal cans, and open drink containers.</li>
-              <li>
-                Weapons of any type (including costume props with sharp metal blades or firing
-                mechanisms).
-              </li>
-              <li>Illegal substances, narcotics, and recreational drugs under Kenya laws.</li>
-              <li>Fireworks, flares, laser pointers, and open flames.</li>
-              <li>
-                Commercial recording equipment, heavy camera rigs, or drones without written press
-                accreditation.
-              </li>
-            </ul>
-          </div>
         </section>
 
-        {/* Section 7: Media, Photography & Filming Consent */}
+        {/* Section 7: Organizer Contact */}
         <section className="space-y-3 border-t border-border/60 pt-8">
           <h2 className="font-display text-xl sm:text-2xl text-amber-300 flex items-center gap-2">
             <span className="text-sm font-mono text-muted-foreground">07.</span>
-            Media &amp; Public Photography Consent
+            Questions and Policy Details
           </h2>
           <p className="text-xs sm:text-sm text-bone-muted">
-            By attending <em>Hauntings of the Rift</em>, you acknowledge that professional
-            photographers and videographers will document the event. You grant Verve &amp; Co. a
-            perpetual, royalty-free license to use incidental crowd photographs and video footage in
-            official aftermovies, social media recaps, and promotional materials.
+            Contact the organizer for information about photography, recording, entry rules, or any
+            other policy not described on this page.
           </p>
         </section>
 
-        {/* Section 8: Right of Admission & Conduct */}
-        <section className="space-y-3 border-t border-border/60 pt-8">
-          <h2 className="font-display text-xl sm:text-2xl text-amber-300 flex items-center gap-2">
-            <span className="text-sm font-mono text-muted-foreground">08.</span>
-            Right of Admission Reserved (R.O.A.R.)
-          </h2>
-          <p className="text-xs sm:text-sm text-bone-muted">
-            Security personnel and event management reserve the unconditional right to refuse entry
-            or eject any patron engaging in harassment, physical altercation, trespassing beyond
-            safety barricades, intoxication endangering others, or general non-compliance with staff
-            instructions.
-          </p>
-        </section>
-
-        {/* Section 9: Governing Law & Contact */}
+        {/* Section 8: Organizer Contact */}
         <section className="space-y-4 border-t border-border/60 pt-8 bg-card/50 p-6 border border-border">
-          <h2 className="font-display text-xl text-bone">Governing Law &amp; Organizer Contact</h2>
-          <p className="text-xs sm:text-sm text-bone-muted">
-            These terms are governed exclusively by the laws of the Republic of Kenya. Any disputes
-            arising from ticket purchases or event operations fall under the jurisdiction of Kenyan
-            courts.
-          </p>
+          <h2 className="font-display text-xl text-bone">Organizer Contact</h2>
           <div className="font-mono text-xs space-y-1 text-bone pt-2">
             <div>
               <strong>Event Organizer:</strong> Verve &amp; Co.

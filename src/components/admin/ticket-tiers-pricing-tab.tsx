@@ -28,7 +28,7 @@ export interface TicketTier {
   priceKes: number;
   admitsCount: number;
   totalInventory: number | null;
-  soldCount?: number;
+  soldCount?: number | null;
   active: boolean;
 }
 
@@ -39,8 +39,8 @@ const DEFAULT_TIERS: TicketTier[] = [
     name: "Early Bird",
     priceKes: 1000,
     admitsCount: 1,
-    totalInventory: 300,
-    soldCount: 42,
+    totalInventory: null,
+    soldCount: null,
     active: true,
   },
   {
@@ -49,18 +49,18 @@ const DEFAULT_TIERS: TicketTier[] = [
     name: "Couple Pass",
     priceKes: 1800,
     admitsCount: 2,
-    totalInventory: 150,
-    soldCount: 18,
+    totalInventory: null,
+    soldCount: null,
     active: true,
   },
   {
     id: "00000000-0000-0000-0000-000000000013",
     slug: "group-of-four",
     name: "Group of Four",
-    priceKes: 3200,
+    priceKes: 3600,
     admitsCount: 4,
-    totalInventory: 75,
-    soldCount: 9,
+    totalInventory: null,
+    soldCount: null,
     active: true,
   },
 ];
@@ -75,7 +75,7 @@ export function TicketTiersPricingTab() {
   const [showAddForm, setShowAddForm] = useState(false);
   const [newSlug, setNewSlug] = useState("");
   const [newName, setNewName] = useState("");
-  const [newPrice, setNewPrice] = useState("2500");
+  const [newPrice, setNewPrice] = useState("");
   const [newAdmits, setNewAdmits] = useState("1");
   const [newInventory, setNewInventory] = useState("");
   const [isCreating, setIsCreating] = useState(false);
@@ -86,11 +86,14 @@ export function TicketTiersPricingTab() {
     try {
       const res = await fetch("/api/admin/ticket-tiers");
       const data = await res.json();
-      if (data.success && Array.isArray(data.tiers) && data.tiers.length > 0) {
-        setTiers(data.tiers);
+      if (!res.ok || !data.success || !Array.isArray(data.tiers)) {
+        throw new Error(data.message || "Failed to load ticket tiers.");
       }
+      setTiers(data.tiers);
     } catch (err) {
-      console.warn("Using local tiers store fallback:", err);
+      console.error("Could not load ticket tiers:", err);
+      setTiers([]);
+      toast.error("Ticket tiers could not be loaded from the server.");
     } finally {
       setIsLoading(false);
     }
@@ -142,9 +145,8 @@ export function TicketTiersPricingTab() {
         toast.error(data.message || "Failed to update ticket tier");
       }
     } catch (err) {
-      toast.success(`Saved "${tier.name}" locally`, {
-        description: `Price set to KES ${tier.priceKes.toLocaleString()}`,
-      });
+      console.error("Could not save ticket tier:", err);
+      toast.error("Ticket tier was not saved. Check the server connection and try again.");
     } finally {
       setSavingSlug(null);
     }
@@ -186,7 +188,7 @@ export function TicketTiersPricingTab() {
         setShowAddForm(false);
         setNewSlug("");
         setNewName("");
-        setNewPrice("2500");
+        setNewPrice("");
         setNewAdmits("1");
         setNewInventory("");
       } else {

@@ -12,6 +12,16 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as CheckoutRouteImport } from './routes/checkout'
+import { Route as PayRouteImport } from './routes/pay'
+import { Route as PrivacyRouteImport } from './routes/privacy'
+import { Route as RecoverRouteImport } from './routes/recover'
+import { Route as ScannerRouteImport } from './routes/scanner'
+import { Route as TermsRouteImport } from './routes/terms'
+import { Route as TicketsRouteImport } from './routes/tickets'
+import { Route as AdminLoginRouteImport } from './routes/admin.login'
+import { Route as AdminReconciliationRouteImport } from './routes/admin.reconciliation'
+import { Route as AdminScanRouteImport } from './routes/admin.scan'
+import { Route as TicketCodeRouteImport } from './routes/ticket.$code'
 import { Route as TicketDemoRouteImport } from './routes/ticket.demo'
 
 const IndexRoute = IndexRouteImport.update({
@@ -29,6 +39,56 @@ const CheckoutRoute = CheckoutRouteImport.update({
   path: '/checkout',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PayRoute = PayRouteImport.update({
+  id: '/pay',
+  path: '/pay',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PrivacyRoute = PrivacyRouteImport.update({
+  id: '/privacy',
+  path: '/privacy',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RecoverRoute = RecoverRouteImport.update({
+  id: '/recover',
+  path: '/recover',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ScannerRoute = ScannerRouteImport.update({
+  id: '/scanner',
+  path: '/scanner',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TermsRoute = TermsRouteImport.update({
+  id: '/terms',
+  path: '/terms',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TicketsRoute = TicketsRouteImport.update({
+  id: '/tickets',
+  path: '/tickets',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminLoginRoute = AdminLoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminReconciliationRoute = AdminReconciliationRouteImport.update({
+  id: '/reconciliation',
+  path: '/reconciliation',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminScanRoute = AdminScanRouteImport.update({
+  id: '/scan',
+  path: '/scan',
+  getParentRoute: () => AdminRoute,
+} as any)
+const TicketCodeRoute = TicketCodeRouteImport.update({
+  id: '/ticket/$code',
+  path: '/ticket/$code',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TicketDemoRoute = TicketDemoRouteImport.update({
   id: '/ticket/demo',
   path: '/ticket/demo',
@@ -37,35 +97,115 @@ const TicketDemoRoute = TicketDemoRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/admin': typeof AdminRoute
+  '/admin': typeof AdminRouteWithChildren
   '/checkout': typeof CheckoutRoute
+  '/pay': typeof PayRoute
+  '/privacy': typeof PrivacyRoute
+  '/recover': typeof RecoverRoute
+  '/scanner': typeof ScannerRoute
+  '/terms': typeof TermsRoute
+  '/tickets': typeof TicketsRoute
+  '/admin/login': typeof AdminLoginRoute
+  '/admin/reconciliation': typeof AdminReconciliationRoute
+  '/admin/scan': typeof AdminScanRoute
+  '/ticket/$code': typeof TicketCodeRoute
   '/ticket/demo': typeof TicketDemoRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/admin': typeof AdminRoute
+  '/admin': typeof AdminRouteWithChildren
   '/checkout': typeof CheckoutRoute
+  '/pay': typeof PayRoute
+  '/privacy': typeof PrivacyRoute
+  '/recover': typeof RecoverRoute
+  '/scanner': typeof ScannerRoute
+  '/terms': typeof TermsRoute
+  '/tickets': typeof TicketsRoute
+  '/admin/login': typeof AdminLoginRoute
+  '/admin/reconciliation': typeof AdminReconciliationRoute
+  '/admin/scan': typeof AdminScanRoute
+  '/ticket/$code': typeof TicketCodeRoute
   '/ticket/demo': typeof TicketDemoRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/admin': typeof AdminRoute
+  '/admin': typeof AdminRouteWithChildren
   '/checkout': typeof CheckoutRoute
+  '/pay': typeof PayRoute
+  '/privacy': typeof PrivacyRoute
+  '/recover': typeof RecoverRoute
+  '/scanner': typeof ScannerRoute
+  '/terms': typeof TermsRoute
+  '/tickets': typeof TicketsRoute
+  '/admin/login': typeof AdminLoginRoute
+  '/admin/reconciliation': typeof AdminReconciliationRoute
+  '/admin/scan': typeof AdminScanRoute
+  '/ticket/$code': typeof TicketCodeRoute
   '/ticket/demo': typeof TicketDemoRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/admin' | '/checkout' | '/ticket/demo'
+  fullPaths:
+    | '/'
+    | '/admin'
+    | '/checkout'
+    | '/pay'
+    | '/privacy'
+    | '/recover'
+    | '/scanner'
+    | '/terms'
+    | '/tickets'
+    | '/admin/login'
+    | '/admin/reconciliation'
+    | '/admin/scan'
+    | '/ticket/$code'
+    | '/ticket/demo'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/admin' | '/checkout' | '/ticket/demo'
-  id: '__root__' | '/' | '/admin' | '/checkout' | '/ticket/demo'
+  to:
+    | '/'
+    | '/admin'
+    | '/checkout'
+    | '/pay'
+    | '/privacy'
+    | '/recover'
+    | '/scanner'
+    | '/terms'
+    | '/tickets'
+    | '/admin/login'
+    | '/admin/reconciliation'
+    | '/admin/scan'
+    | '/ticket/$code'
+    | '/ticket/demo'
+  id:
+    | '__root__'
+    | '/'
+    | '/admin'
+    | '/checkout'
+    | '/pay'
+    | '/privacy'
+    | '/recover'
+    | '/scanner'
+    | '/terms'
+    | '/tickets'
+    | '/admin/login'
+    | '/admin/reconciliation'
+    | '/admin/scan'
+    | '/ticket/$code'
+    | '/ticket/demo'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  AdminRoute: typeof AdminRoute
+  AdminRoute: typeof AdminRouteWithChildren
   CheckoutRoute: typeof CheckoutRoute
+  PayRoute: typeof PayRoute
+  PrivacyRoute: typeof PrivacyRoute
+  RecoverRoute: typeof RecoverRoute
+  ScannerRoute: typeof ScannerRoute
+  TermsRoute: typeof TermsRoute
+  TicketsRoute: typeof TicketsRoute
+  TicketCodeRoute: typeof TicketCodeRoute
   TicketDemoRoute: typeof TicketDemoRoute
 }
 
@@ -92,6 +232,76 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CheckoutRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/pay': {
+      id: '/pay'
+      path: '/pay'
+      fullPath: '/pay'
+      preLoaderRoute: typeof PayRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/privacy': {
+      id: '/privacy'
+      path: '/privacy'
+      fullPath: '/privacy'
+      preLoaderRoute: typeof PrivacyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/recover': {
+      id: '/recover'
+      path: '/recover'
+      fullPath: '/recover'
+      preLoaderRoute: typeof RecoverRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/scanner': {
+      id: '/scanner'
+      path: '/scanner'
+      fullPath: '/scanner'
+      preLoaderRoute: typeof ScannerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/terms': {
+      id: '/terms'
+      path: '/terms'
+      fullPath: '/terms'
+      preLoaderRoute: typeof TermsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/tickets': {
+      id: '/tickets'
+      path: '/tickets'
+      fullPath: '/tickets'
+      preLoaderRoute: typeof TicketsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/login': {
+      id: '/admin/login'
+      path: '/login'
+      fullPath: '/admin/login'
+      preLoaderRoute: typeof AdminLoginRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/reconciliation': {
+      id: '/admin/reconciliation'
+      path: '/reconciliation'
+      fullPath: '/admin/reconciliation'
+      preLoaderRoute: typeof AdminReconciliationRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/scan': {
+      id: '/admin/scan'
+      path: '/scan'
+      fullPath: '/admin/scan'
+      preLoaderRoute: typeof AdminScanRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/ticket/$code': {
+      id: '/ticket/$code'
+      path: '/ticket/$code'
+      fullPath: '/ticket/$code'
+      preLoaderRoute: typeof TicketCodeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/ticket/demo': {
       id: '/ticket/demo'
       path: '/ticket/demo'
@@ -102,10 +312,31 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface AdminRouteChildren {
+  AdminLoginRoute: typeof AdminLoginRoute
+  AdminReconciliationRoute: typeof AdminReconciliationRoute
+  AdminScanRoute: typeof AdminScanRoute
+}
+
+const AdminRouteChildren: AdminRouteChildren = {
+  AdminLoginRoute: AdminLoginRoute,
+  AdminReconciliationRoute: AdminReconciliationRoute,
+  AdminScanRoute: AdminScanRoute,
+}
+
+const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  AdminRoute: AdminRoute,
+  AdminRoute: AdminRouteWithChildren,
   CheckoutRoute: CheckoutRoute,
+  PayRoute: PayRoute,
+  PrivacyRoute: PrivacyRoute,
+  RecoverRoute: RecoverRoute,
+  ScannerRoute: ScannerRoute,
+  TermsRoute: TermsRoute,
+  TicketsRoute: TicketsRoute,
+  TicketCodeRoute: TicketCodeRoute,
   TicketDemoRoute: TicketDemoRoute,
 }
 export const routeTree = rootRouteImport

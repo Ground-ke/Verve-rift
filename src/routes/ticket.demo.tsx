@@ -26,10 +26,10 @@ type State = "valid" | "used" | "cancelled" | "invalid";
 function TicketDemo() {
   const [state, setState] = useState<State>("valid");
   const stateData = {
-    valid: ["Valid ticket", "Ready for entry", CheckCircle2],
-    used: ["Used ticket", "Already checked in", ScanLine],
-    cancelled: ["Cancelled ticket", "Not valid for entry", CircleX],
-    invalid: ["Invalid ticket", "Unable to verify", CircleX],
+    valid: ["Valid-state preview", "Example only — not valid for entry", CheckCircle2],
+    used: ["Used-state preview", "Example state only", ScanLine],
+    cancelled: ["Cancelled-state preview", "Example state only", CircleX],
+    invalid: ["Invalid-state preview", "Example state only", CircleX],
   } as const;
   const [title, sub, Icon] = stateData[state];
   return (
@@ -72,7 +72,7 @@ function TicketDemo() {
                     <dt className="text-xs uppercase tracking-widest text-muted-foreground">
                       Ticket
                     </dt>
-                    <dd className="mt-1 text-xl text-bone">Early Bird</dd>
+                    <dd className="mt-1 text-xl text-bone">Early Bird (Example)</dd>
                   </div>
                   <div>
                     <dt className="text-xs uppercase tracking-widest text-muted-foreground">
@@ -84,11 +84,12 @@ function TicketDemo() {
                     <dt className="text-xs uppercase tracking-widest text-muted-foreground">
                       Ticket ID
                     </dt>
-                    <dd className="mt-1 text-xl text-bone">HRT-DEMO-001</dd>
+                    <dd className="mt-1 text-xl text-bone">Example ID: HRT-DEMO-001</dd>
                   </div>
                 </dl>
                 <div className="mt-8 flex items-center gap-2 border-t border-border pt-5 text-sm text-muted-foreground">
-                  <Clock3 className="size-4" />4 PM till late · Top Cliff Lounge, Nakuru
+                  <Clock3 className="size-4" />
+                  4 PM till late · The Lawns Restaurant, Nakuru
                 </div>
               </div>
               <QRPlaceholder />
@@ -114,8 +115,8 @@ function TicketDemo() {
               ))}
             </div>
             <p className="mt-6 text-sm text-muted-foreground">
-              The production ticket will receive attendee data, a backend-issued ID, entry
-              instructions, and a signed QR payload.
+              This preview contains sample data only. It does not represent a real ticket or
+              change a ticket&apos;s status.
             </p>
           </aside>
         </div>

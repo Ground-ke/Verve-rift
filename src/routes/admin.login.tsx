@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { useAdminAuth } from "@/lib/auth/admin-auth-context";
 import { VerveIcon } from "@/components/brand/verve-logo";
@@ -13,8 +13,6 @@ import {
   LogOut,
   Eye,
   EyeOff,
-  Sparkles,
-  Shield,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,11 +34,10 @@ export const Route = createFileRoute("/admin/login")({
 });
 
 function AdminLogin() {
-  const navigate = useNavigate();
   const { signInWithEmail, signInWithGoogle, signOut, user, isAuthenticated, isAdmin, isLoading } =
     useAdminAuth();
 
-  const [email, setEmail] = useState("verve.n.co.ke@gmail.com");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -57,7 +54,7 @@ function AdminLogin() {
     return "/admin";
   };
 
-  // If already authenticated as admin, provide instant redirect to admin dashboard
+  // Staff sessions go directly to the dashboard; customer sessions stay on this page.
   useEffect(() => {
     if (!isLoading && isAuthenticated && isAdmin) {
       const timer = setTimeout(() => {
@@ -65,17 +62,11 @@ function AdminLogin() {
       }, 300);
       return () => clearTimeout(timer);
     }
-  }, [isLoading, isAuthenticated, isAdmin]);
-
-  // Quick fill organizer credentials
-  const handleFillOrganizerCredentials = () => {
-    setEmail("verve.n.co.ke@gmail.com");
-    setPassword("Vervepassword25rift");
-    setErrorMessage(null);
-    toast.info("Organizer credentials filled", {
-      description: "verve.n.co.ke@gmail.com / Vervepassword25rift",
-    });
-  };
+    if (!isLoading && isAuthenticated && user?.role === "customer") {
+      setErrorMessage("This account is not assigned an event staff role.");
+      void signOut();
+    }
+  }, [isLoading, isAuthenticated, isAdmin, user?.role, signOut]);
 
   // 1. Sign In with Google
   const handleGoogleSignIn = async () => {
@@ -83,12 +74,7 @@ function AdminLogin() {
     setErrorMessage(null);
     try {
       const res = await signInWithGoogle();
-      if (res.success) {
-        toast.success("Authenticated as Event Administrator", {
-          description: "Welcome to Verve & Co. Operations Dashboard",
-        });
-        window.location.href = getAdminRedirect();
-      } else {
+      if (!res.success) {
         setErrorMessage(res.message || "Failed to sign in with Google.");
       }
     } catch (err) {
@@ -107,7 +93,7 @@ function AdminLogin() {
     try {
       const res = await signInWithEmail(email, password);
       if (res.success) {
-        toast.success("Authenticated as Event Administrator", {
+        toast.success("Event staff sign-in successful", {
           description: `Logged in as ${email}`,
         });
         window.location.href = getAdminRedirect();
@@ -260,35 +246,6 @@ function AdminLogin() {
               </span>
               Sign In with Email
             </span>
-            <button
-              type="button"
-              onClick={handleFillOrganizerCredentials}
-              className="text-[10px] text-amber-400 hover:text-amber-300 font-mono underline inline-flex items-center gap-1"
-              title="One-click fill organizer credentials"
-            >
-              <Sparkles className="w-3 h-3" />
-              Auto-fill credentials
-            </button>
-          </div>
-
-          {/* Organizer Credentials Hint Pill */}
-          <div className="p-2.5 border border-amber-500/20 bg-amber-950/20 rounded text-[11px] font-mono text-amber-200/90 space-y-1">
-            <div className="flex items-center justify-between text-[10px] text-amber-300/80 uppercase tracking-wider font-semibold">
-              <span className="flex items-center gap-1">
-                <Shield className="w-3 h-3 text-amber-400" />
-                Organizer Access Details
-              </span>
-            </div>
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-[10px]">
-              <div>
-                Email:{" "}
-                <span className="text-bone select-all font-semibold">verve.n.co.ke@gmail.com</span>
-              </div>
-              <div>
-                Password:{" "}
-                <span className="text-bone select-all font-semibold">Vervepassword25rift</span>
-              </div>
-            </div>
           </div>
 
           <div className="space-y-1.5">
@@ -342,7 +299,7 @@ function AdminLogin() {
                 type={showPassword ? "text" : "password"}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Vervepassword25rift"
+                placeholder="Enter your password"
                 required
                 className="bg-background border-border text-bone font-mono text-sm pl-9 pr-9"
               />
@@ -373,8 +330,7 @@ function AdminLogin() {
         <div className="pt-2 flex items-start gap-2 text-[11px] text-muted-foreground font-mono">
           <CheckCircle2 className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
           <span>
-            Protected by Cloud Firestore access rules, rate-limited tokens, and immutable audit
-            logs.
+            Event staff access is verified against your authenticated account role.
           </span>
         </div>
       </div>

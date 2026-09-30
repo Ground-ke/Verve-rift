@@ -1,5 +1,4 @@
 import { OrderService } from "./order-service";
-import { MpesaService, DarajaCallbackPayload } from "./mpesa-service";
 import { TicketsServerService } from "./tickets.server";
 import { AdminServerService } from "./admin-service";
 import { RefundService } from "./refund-service";
@@ -27,6 +26,7 @@ import {
 } from "../lib/validation/api-schemas";
 import { sanitizeObject } from "../lib/validation/sanitizer";
 import { isCloudSqlConfigured } from "../db/index.ts";
+import { authorizeStaffApiRequest, requiredApiRoles } from "./api-auth";
 
 export async function handleApiRequest(request: Request): Promise<Response> {
   const url = new URL(request.url);
@@ -43,10 +43,6 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         "X-Content-Type-Options": "nosniff",
         "X-Frame-Options": "SAMEORIGIN",
         "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers":
-          "Content-Type, Authorization, X-Requested-With, Idempotency-Key",
       },
     });
   };
@@ -63,19 +59,29 @@ export async function handleApiRequest(request: Request): Promise<Response> {
 
   // Handle CORS preflight
   if (method === "OPTIONS") {
-    return new Response(null, {
-      status: 204,
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers":
-          "Content-Type, Authorization, X-Requested-With, Idempotency-Key",
-        "Access-Control-Max-Age": "86400",
-      },
-    });
+    return new Response(null, { status: 403 });
   }
 
   try {
+    const requiredRoles = requiredApiRoles(pathname);
+    let apiRequestRole: "admin" | "scanner" | null = null;
+
+    if (requiredRoles) {
+      const authorization = await authorizeStaffApiRequest(request, requiredRoles);
+      if (!authorization.success) {
+        return errorJson(
+          authorization.message,
+          authorization.status === 401
+            ? "UNAUTHORIZED"
+            : authorization.status === 403
+              ? "FORBIDDEN"
+              : "AUTH_UNAVAILABLE",
+          authorization.status,
+        );
+      }
+      apiRequestRole = authorization.identity.role;
+    }
+
     // --------------------------------------------------------------------------
     // 1. Health check
     // --------------------------------------------------------------------------
@@ -94,8 +100,10 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           ),
         },
         services: {
-          mpesaConfigured: Boolean(
-            process.env.MPESA_CONSUMER_KEY && process.env.MPESA_CONSUMER_SECRET,
+          manualMpesaConfigured: Boolean(
+            process.env.VITE_MPESA_PAYBILL &&
+              process.env.VITE_MPESA_ACCOUNT &&
+              process.env.VITE_MPESA_ACCOUNT_NAME,
           ),
           gmailSmtpConfigured: Boolean(
             (process.env.SMTP_USER ||
@@ -189,6 +197,13 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         body["token"] || body["checkoutToken"]
           ? String(body["token"] || body["checkoutToken"])
           : undefined;
+      if (!checkoutToken) {
+        return errorJson(
+          "A checkout authorization token is required to submit a payment reference.",
+          "UNAUTHORIZED",
+          401,
+        );
+      }
       const rawInput = String(
         body["mpesa_code"] ||
           body["mpesaCode"] ||
@@ -226,7 +241,6 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         checkoutToken,
         mpesaCode: extractedCode,
         mpesaMessage: rawInput.trim(),
-        buyerEmail,
       });
 
       if (!result.success || !result.order) {
@@ -234,7 +248,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       }
 
       const order = result.order;
-      const targetEmail = (buyerEmail || order.buyerEmail || "").trim().toLowerCase();
+      const targetEmail = (order.buyerEmail || "").trim().toLowerCase();
 
       // 1. Automate receipt & verification pending email to buyer
       let buyerEmailDispatched = false;
@@ -341,67 +355,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     }
 
     // --------------------------------------------------------------------------
-    // 5. POST /api/payments/mpesa/stkpush (STK Push Disabled - Message Reading Active)
-    // --------------------------------------------------------------------------
-    if (pathname === "/api/payments/mpesa/stkpush" && method === "POST") {
-      return errorJson(
-        "Daraja STK Push has been retired. Please submit your M-Pesa transaction reference or SMS message to /api/orders/submit-mpesa-code.",
-        "STK_PUSH_RETIRED",
-        410,
-      );
-    }
-
-    // --------------------------------------------------------------------------
-    // 6. POST /api/payments/mpesa/callback (Safaricom Daraja Webhook Handler)
-    // --------------------------------------------------------------------------
-    if (pathname === "/api/payments/mpesa/callback" && method === "POST") {
-      let callbackBody: DarajaCallbackPayload;
-      try {
-        callbackBody = (await request.json()) as DarajaCallbackPayload;
-      } catch {
-        return errorJson("Invalid JSON callback payload.", "INVALID_JSON", 400);
-      }
-
-      const { statusCode, response } = await MpesaService.processCallback(callbackBody);
-      return json(response, statusCode);
-    }
-
-    // --------------------------------------------------------------------------
-    // 7. GET /api/payments/status (Polling Endpoint for Checkout Client)
-    // --------------------------------------------------------------------------
-    if (pathname === "/api/payments/status" && method === "GET") {
-      const orderId = url.searchParams.get("order_id") || url.searchParams.get("orderId");
-      const token =
-        url.searchParams.get("token") ||
-        request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
-
-      if (!orderId || !token) {
-        return errorJson(
-          "order_id and checkout token are required for payment status.",
-          "UNAUTHORIZED",
-          401,
-        );
-      }
-
-      const statusResult = MpesaService.getPaymentStatus(orderId, token);
-      if (!statusResult) {
-        return errorJson("Order not found or authorization token invalid.", "UNAUTHORIZED", 401);
-      }
-
-      // If payment is successful, ensure tickets are issued
-      if (statusResult.paymentStatus === "successful" || statusResult.orderStatus === "paid") {
-        try {
-          await TicketsServerService.issueTicketsForOrder(orderId, token);
-        } catch (e) {
-          console.warn("Could not auto-issue tickets on poll:", e);
-        }
-      }
-
-      return json(statusResult);
-    }
-
-    // --------------------------------------------------------------------------
-    // 8. POST /api/pay/verify (Idempotency Gate for Payment Verification)
+    // 5. POST /api/pay/verify (Idempotency Gate for Verified Orders)
     // --------------------------------------------------------------------------
     if (pathname === "/api/pay/verify" && method === "POST") {
       let body: Record<string, unknown>;
@@ -425,7 +379,6 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         idempotencyKey,
         orderId,
         token,
-        mpesaReceipt,
         clientIp,
       });
 
@@ -1381,6 +1334,13 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       }
 
       const data = parseResult.data;
+      if (apiRequestRole === "scanner" && data.templateType !== "gate_alert") {
+        return errorJson(
+          "Scanners may only dispatch gate alerts.",
+          "FORBIDDEN",
+          403,
+        );
+      }
       const dispatchResult = await WhatsAppNotificationService.sendNotification({
         recipientPhone: data.phone,
         template: data.templateType,

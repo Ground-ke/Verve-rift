@@ -57,49 +57,27 @@ export const createPool = (): Pool => {
   return global._postgresPool;
 };
 
-const createMockDb = (): ReturnType<typeof drizzle<typeof schema>> => {
-  const noOp = {
-    findMany: async () => [],
-    findFirst: async () => null,
-    findUnique: async () => null,
-    create: async (d: { data?: unknown }) => d?.data ?? {},
-    update: async (d: { data?: unknown }) => d?.data ?? {},
-    delete: async () => ({}),
-  };
-  return new Proxy({} as unknown as ReturnType<typeof drizzle<typeof schema>>, {
-    get: (_, prop) =>
-      prop === "query"
-        ? new Proxy({}, { get: () => noOp })
-        : () => ({
-            values: () => ({ returning: async () => [] }),
-            set: () => ({ where: () => ({ returning: async () => [] }) }),
-            where: () => ({ limit: async () => [] }),
-            from: () => ({ where: () => ({ limit: async () => [] }) }),
-          }),
-  });
-};
+export function getSharedPool(): Pool {
+  if (!isCloudSqlConfigured()) {
+    throw new Error("Shared PostgreSQL persistence is not configured");
+  }
+  return createPool();
+}
 
 // Initialize pool lazily to avoid connection attempts if Cloud SQL is not configured
 let dbInstance: ReturnType<typeof drizzle<typeof schema>> | null = null;
 
 export const getDb = () => {
   if (!isCloudSqlConfigured()) {
-    if (!dbInstance) {
-      dbInstance = createMockDb();
-    }
-    return dbInstance;
+    throw new Error("Shared PostgreSQL persistence is not configured");
   }
   if (!dbInstance) {
-    try {
-      const pool = createPool();
-      dbInstance = drizzle(pool, { schema });
-    } catch {
-      console.warn("[AI Studio] Database not connected — using mock");
-      dbInstance = createMockDb();
-    }
+    dbInstance = drizzle(getSharedPool(), { schema });
   }
   return dbInstance;
 };
 
-export const db = getDb();
+export const db = new Proxy({} as ReturnType<typeof drizzle<typeof schema>>, {
+  get: (_, property) => Reflect.get(getDb(), property),
+});
 export { schema };

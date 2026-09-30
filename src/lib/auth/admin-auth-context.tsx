@@ -1,16 +1,8 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import {
-  GoogleAuthProvider,
-  signInWithPopup,
-  onAuthStateChanged,
-  signOut as firebaseSignOut,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  type User as FirebaseUser,
-} from "firebase/auth";
-import { doc, getDoc, setDoc } from "firebase/firestore";
-import { auth, db, isFirebaseConfigured } from "../firebase/config";
 import { supabaseClient, isSupabaseConfigured } from "../supabase/client";
+import { installStaffApiFetch } from "./staff-api-fetch";
+
+installStaffApiFetch();
 
 export type UserRole = "admin" | "scanner" | "customer";
 
@@ -19,7 +11,6 @@ export interface AdminUser {
   email: string;
   name: string;
   role: UserRole;
-  isFirebase?: boolean;
 }
 
 interface AdminAuthContextType {
@@ -29,506 +20,198 @@ interface AdminAuthContextType {
   isAuthenticated: boolean;
   isAdmin: boolean;
   isScanner: boolean;
-  firebaseUser: FirebaseUser | null;
-  isFirebaseConfigured: boolean;
-  signIn: (email: string, role?: UserRole) => Promise<{ success: boolean; message?: string }>;
   signInWithEmail: (
     email: string,
     password?: string,
   ) => Promise<{ success: boolean; message?: string }>;
   signInWithGoogle: () => Promise<{ success: boolean; message?: string }>;
   signOut: () => Promise<void>;
-  switchTestRole: (role: UserRole) => void;
 }
 
 const AdminAuthContext = createContext<AdminAuthContextType | undefined>(undefined);
 
-const STORAGE_KEY = "rift_admin_session";
+async function resolveUser(
+  id: string,
+  email: string | undefined,
+  name: string | undefined,
+): Promise<AdminUser> {
+  let role: UserRole = "customer";
 
-// Helper to determine if an email is an authorized organizer superadmin
-export const isOrganizerEmail = (email?: string | null): boolean => {
-  if (!email) return false;
-  const normalized = email.trim().toLowerCase();
-  return (
-    normalized === "verve.n.co.ke@gmail.com" ||
-    normalized === "erastus.n.gathungu@gmail.com" ||
-    normalized.endsWith("@verve.co.ke") ||
-    normalized.includes("admin") ||
-    normalized.includes("verve")
-  );
-};
+  if (supabaseClient) {
+    const { data, error } = await supabaseClient
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", id);
 
-// Preset accounts for seamless evaluation and verification
-export const PRESET_ACCOUNTS: Record<UserRole, AdminUser> = {
-  admin: {
-    id: "usr-admin-verve",
-    email: "verve.n.co.ke@gmail.com",
-    name: "Verve & Co. (Lead Organizer)",
-    role: "admin",
-  },
-  scanner: {
-    id: "usr-scanner-gate",
-    email: "scanner.milimani@verve.co.ke",
-    name: "Gate Alpha Security",
-    role: "scanner",
-  },
-  customer: {
-    id: "usr-customer-amara",
-    email: "amara.vance@example.com",
-    name: "Amara Vance (Attendee)",
-    role: "customer",
-  },
-};
+    if (error) {
+      console.error("Could not load authenticated user's role:", error);
+      throw new Error("Your access role could not be verified. Please try again.");
+    }
+
+    const roles = new Set((data as unknown as Array<{ role: string }>).map((entry) => entry.role));
+    if (roles.has("admin")) role = "admin";
+    else if (roles.has("scanner")) role = "scanner";
+  }
+
+  const normalizedEmail = email?.trim().toLowerCase() || "";
+  return {
+    id,
+    email: normalizedEmail,
+    name: name?.trim() || normalizedEmail.split("@")[0] || "Event staff",
+    role,
+  };
+}
 
 export function AdminAuthProvider({ children }: { children: ReactNode }) {
-  // Synchronous hydration from localStorage
-  const [user, setUser] = useState<AdminUser | null>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const stored = localStorage.getItem(STORAGE_KEY);
-        if (stored) {
-          const parsed = JSON.parse(stored) as AdminUser;
-          // Clear legacy test session if present
-          if (parsed && parsed.email === "gradednjoroge@gmail.com") {
-            localStorage.removeItem(STORAGE_KEY);
-            return null;
-          }
-          if (parsed && isOrganizerEmail(parsed.email)) {
-            parsed.role = "admin";
-          }
-          return parsed;
-        }
-      } catch {
-        // ignore
-      }
-    }
-    return null;
-  });
-  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [user, setUser] = useState<AdminUser | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Initialize session from Firebase Auth, Supabase, or stored preset
   useEffect(() => {
-    let isMounted = true;
+    let mounted = true;
 
-    // 1. Firebase Auth state listener
-    let unsubscribeFirebase: (() => void) | null = null;
-    if (isFirebaseConfigured && auth) {
-      try {
-        unsubscribeFirebase = onAuthStateChanged(auth, (fbUser) => {
-          if (!isMounted) return;
-          setFirebaseUser(fbUser);
-
-          if (fbUser && fbUser.email) {
-            const normalizedEmail = fbUser.email.toLowerCase();
-            let role: UserRole = "customer";
-
-            if (isOrganizerEmail(normalizedEmail)) {
-              role = "admin";
-            } else if (normalizedEmail.includes("scanner")) {
-              role = "scanner";
-            }
-
-            const activeUser: AdminUser = {
-              id: fbUser.uid,
-              email: normalizedEmail,
-              name:
-                fbUser.displayName ||
-                (normalizedEmail === "verve.n.co.ke@gmail.com"
-                  ? "Verve & Co. (Lead Organizer)"
-                  : normalizedEmail.split("@")[0]),
-              role,
-              avatarUrl: fbUser.photoURL || undefined,
-              isFirebase: true,
-            };
-
-            // Immediately set active user and update local cache with ZERO latency
-            setUser(activeUser);
-            try {
-              localStorage.setItem(STORAGE_KEY, JSON.stringify(activeUser));
-            } catch {
-              // ignore
-            }
-            setIsLoading(false);
-
-            // Sync user profile & admin documents in Firestore in the background (non-blocking)
-            if (role === "admin") {
-              setDoc(
-                doc(db, "admins", fbUser.uid),
-                {
-                  email: normalizedEmail,
-                  name: activeUser.name,
-                  role: "admin",
-                  updatedAt: new Date().toISOString(),
-                },
-                { merge: true },
-              ).catch(() => {});
-            }
-
-            setDoc(
-              doc(db, "users", fbUser.uid),
-              {
-                uid: fbUser.uid,
-                email: normalizedEmail,
-                displayName: activeUser.name,
-                role,
-                updatedAt: new Date().toISOString(),
-              },
-              { merge: true },
-            ).catch(() => {});
-
-            return;
-          }
-
-          // If no active Firebase user, check local storage or presets
-          checkStoredOrPreset();
-        });
-      } catch (err) {
-        console.warn("Firebase Auth listener note:", err);
-        checkStoredOrPreset();
-      }
-    } else {
-      checkStoredOrPreset();
-    }
-
-    async function checkStoredOrPreset() {
-      if (!isMounted) return;
-      try {
-        // Check Supabase if configured
-        if (isSupabaseConfigured && supabaseClient) {
-          const {
-            data: { session },
-          } = await supabaseClient.auth.getSession();
-          if (session?.user) {
-            const role = session.user.email?.includes("admin") ? "admin" : "customer";
-            setUser({
-              id: session.user.id,
-              email: session.user.email || "verve.n.co.ke@gmail.com",
-              name: session.user.user_metadata?.["name"] || "Event Staff",
-              role,
-            });
-            setIsLoading(false);
-            return;
-          }
-        }
-
-        // Stored session check
-        const stored = localStorage.getItem(STORAGE_KEY);
-        if (stored) {
-          try {
-            const parsed = JSON.parse(stored) as AdminUser;
-            if (parsed && parsed.email === "gradednjoroge@gmail.com") {
-              localStorage.removeItem(STORAGE_KEY);
-              setUser(null);
-            } else if (parsed) {
-              if (isOrganizerEmail(parsed.email)) {
-                parsed.role = "admin";
-              }
-              setUser(parsed);
-            } else {
-              setUser(null);
-            }
-          } catch {
-            localStorage.removeItem(STORAGE_KEY);
-            setUser(null);
-          }
-        } else {
-          setUser(null);
-        }
-      } catch (err) {
-        console.warn("Auth initialization note:", err);
-      } finally {
+    const initialize = async () => {
+      if (!isSupabaseConfigured || !supabaseClient) {
         setIsLoading(false);
+        return;
       }
+
+      try {
+        const {
+          data: { session },
+          error,
+        } = await supabaseClient.auth.getSession();
+        if (error) throw error;
+        if (session?.user) {
+          const resolved = await resolveUser(
+            session.user.id,
+            session.user.email,
+            session.user.user_metadata?.["name"] ?? session.user.user_metadata?.["full_name"],
+          );
+          if (mounted) setUser(resolved);
+        }
+      } catch (error) {
+        console.error("Could not initialize the authenticated session:", error);
+        if (mounted) setUser(null);
+      } finally {
+        if (mounted) setIsLoading(false);
+      }
+    };
+
+    void initialize();
+
+    if (!isSupabaseConfigured || !supabaseClient) {
+      return () => {
+        mounted = false;
+      };
     }
+
+    const {
+      data: { subscription },
+    } = supabaseClient.auth.onAuthStateChange((_event, session) => {
+      if (!session?.user) {
+        setUser(null);
+        return;
+      }
+
+      window.setTimeout(() => {
+        void resolveUser(
+          session.user.id,
+          session.user.email,
+          session.user.user_metadata?.["name"] ?? session.user.user_metadata?.["full_name"],
+        )
+          .then((resolved) => {
+            if (mounted) setUser(resolved);
+          })
+          .catch((error: unknown) => {
+            console.error("Could not verify the authenticated user's role:", error);
+            if (mounted) setUser(null);
+          });
+      }, 0);
+    });
 
     return () => {
-      isMounted = false;
-      if (unsubscribeFirebase) unsubscribeFirebase();
+      mounted = false;
+      subscription.unsubscribe();
     };
   }, []);
 
-  /**
-   * Firebase Google Sign-In Popup - Instant Dashboard Entrance
-   */
-  const signInWithGoogle = async (): Promise<{ success: boolean; message?: string }> => {
+  const signInWithEmail = async (email: string, password?: string) => {
+    if (!isSupabaseConfigured || !supabaseClient) {
+      return { success: false, message: "Organizer sign-in is not configured yet." };
+    }
+    if (!password) {
+      return { success: false, message: "Enter your account password to continue." };
+    }
+
     setIsLoading(true);
     try {
-      if (!isFirebaseConfigured || !auth) {
-        const fallbackAdmin: AdminUser = {
-          id: "usr-google-sim",
-          email: "verve.n.co.ke@gmail.com",
-          name: "Verve & Co. (Lead Organizer)",
-          role: "admin",
-        };
-        setUser(fallbackAdmin);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(fallbackAdmin));
-        return { success: true };
-      }
-
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({
-        prompt: "select_account",
+      const { error } = await supabaseClient.auth.signInWithPassword({
+        email: email.trim().toLowerCase(),
+        password,
       });
-
-      const result = await signInWithPopup(auth, provider);
-      const fbUser = result.user;
-      setFirebaseUser(fbUser);
-
-      const email = (fbUser.email || "").toLowerCase();
-      const isAdminUser = isOrganizerEmail(email);
-      const role: UserRole = isAdminUser
-        ? "admin"
-        : email.includes("scanner")
-          ? "scanner"
-          : "customer";
-
-      const activeUser: AdminUser = {
-        id: fbUser.uid,
-        email,
-        name:
-          fbUser.displayName ||
-          (email === "verve.n.co.ke@gmail.com"
-            ? "Verve & Co. (Lead Organizer)"
-            : email.split("@")[0]),
-        role,
-        avatarUrl: fbUser.photoURL || undefined,
-        isFirebase: true,
-      };
-
-      // Set user and store immediately - DO NOT wait for network round-trips!
-      setUser(activeUser);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(activeUser));
-
-      // Asynchronously record into Firestore without holding back dashboard entrance
-      if (role === "admin") {
-        setDoc(
-          doc(db, "admins", fbUser.uid),
-          {
-            email,
-            name: activeUser.name,
-            role: "admin",
-            lastLogin: new Date().toISOString(),
-          },
-          { merge: true },
-        ).catch((err) => console.debug("Background admin document sync:", err));
+      if (error) return { success: false, message: error.message };
+      const {
+        data: { session },
+      } = await supabaseClient.auth.getSession();
+      if (!session?.user) {
+        return { success: false, message: "Sign-in completed without an active session." };
       }
-
-      setDoc(
-        doc(db, "users", fbUser.uid),
-        {
-          uid: fbUser.uid,
-          email,
-          displayName: activeUser.name,
-          role,
-          lastLogin: new Date().toISOString(),
-        },
-        { merge: true },
-      ).catch((err) => console.debug("Background user document sync:", err));
-
+      const resolved = await resolveUser(
+        session.user.id,
+        session.user.email,
+        session.user.user_metadata?.["name"] ?? session.user.user_metadata?.["full_name"],
+      );
+      if (resolved.role === "customer") {
+        await supabaseClient.auth.signOut();
+        return { success: false, message: "This account is not assigned an event staff role." };
+      }
+      setUser(resolved);
       return { success: true };
-    } catch (err: unknown) {
-      console.warn("Firebase Google Sign-In note:", err);
-      const code =
-        typeof err === "object" && err !== null && "code" in err
-          ? String((err as { code: unknown }).code)
-          : "";
-
-      // In Cloud Run / preview environments where Google popup is blocked or domain is unauthorized,
-      // gracefully authorize as the verified organizer (Verve & Co.)
-      if (
-        code === "auth/unauthorized-domain" ||
-        code === "auth/popup-blocked" ||
-        code === "auth/cancelled-popup-request" ||
-        code === "auth/popup-closed-by-user" ||
-        !code
-      ) {
-        const activeUser: AdminUser = {
-          id: "usr-google-verified-organizer",
-          email: "verve.n.co.ke@gmail.com",
-          name: "Verve & Co. (Lead Organizer)",
-          role: "admin",
-          isFirebase: false,
-        };
-        setUser(activeUser);
-        try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(activeUser));
-        } catch {
-          // ignore
-        }
-        return { success: true };
-      }
-
+    } catch (error) {
+      console.error("Supabase sign-in failed:", error);
+      await supabaseClient.auth.signOut();
       return {
         success: false,
-        message: err instanceof Error ? err.message : "Google authentication failed.",
+        message: error instanceof Error ? error.message : "Sign-in failed.",
       };
     } finally {
       setIsLoading(false);
     }
   };
 
-  /**
-   * Organizer Sign In with Email & Password
-   * Supports:
-   * 1. Official Organizer Credentials: verve.n.co.ke@gmail.com / Vervepassword25rift
-   * 2. General accounts / staff / scanners
-   */
-  const signInWithEmail = async (
-    email: string,
-    password?: string,
-  ): Promise<{ success: boolean; message?: string }> => {
+  const signInWithGoogle = async () => {
+    if (!isSupabaseConfigured || !supabaseClient) {
+      return { success: false, message: "Organizer sign-in is not configured yet." };
+    }
+
     setIsLoading(true);
     try {
-      const normalizedEmail = email.trim().toLowerCase();
-      const enteredPassword = (password || "").trim();
-
-      // Specific validation for organizer portal account verve.n.co.ke@gmail.com
-      if (normalizedEmail === "verve.n.co.ke@gmail.com") {
-        if (!enteredPassword) {
-          return {
-            success: false,
-            message: "Please enter the organizer password (Vervepassword25rift).",
-          };
-        }
-        if (enteredPassword !== "Vervepassword25rift") {
-          return {
-            success: false,
-            message: "Invalid organizer password. Please check your credentials.",
-          };
-        }
-
-        // Attempt Firebase Auth sign-in so rules permit access to orders and tickets
-        let fbUid = "usr-organizer-verve";
-        if (auth) {
-          try {
-            const userCred = await signInWithEmailAndPassword(
-              auth,
-              normalizedEmail,
-              enteredPassword,
-            );
-            fbUid = userCred.user.uid;
-            setFirebaseUser(userCred.user);
-          } catch (fbErr: unknown) {
-            const code =
-              typeof fbErr === "object" && fbErr !== null && "code" in fbErr
-                ? String((fbErr as { code: unknown }).code)
-                : "";
-            if (code === "auth/user-not-found" || code === "auth/invalid-credential") {
-              try {
-                const newCred = await createUserWithEmailAndPassword(
-                  auth,
-                  normalizedEmail,
-                  enteredPassword,
-                );
-                fbUid = newCred.user.uid;
-                setFirebaseUser(newCred.user);
-              } catch (createErr) {
-                console.debug("[Firebase Auth] Account init note:", createErr);
-              }
-            }
-          }
-        }
-
-        const activeUser: AdminUser = {
-          id: fbUid,
-          email: "verve.n.co.ke@gmail.com",
-          name: "Verve & Co. (Lead Organizer)",
-          role: "admin",
-          isFirebase: Boolean(auth?.currentUser),
-        };
-
-        setUser(activeUser);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(activeUser));
-
-        // Background write to admins collection
-        try {
-          if (db) {
-            setDoc(
-              doc(db, "admins", fbUid),
-              {
-                email: "verve.n.co.ke@gmail.com",
-                name: "Verve & Co. (Lead Organizer)",
-                role: "admin",
-                lastLogin: new Date().toISOString(),
-              },
-              { merge: true },
-            ).catch(() => {});
-          }
-        } catch {
-          // ignore
-        }
-
-        return { success: true };
-      }
-
-      // General accounts / staff / scanners
-      let assignedRole: UserRole = "customer";
-      if (normalizedEmail.includes("scanner")) {
-        assignedRole = "scanner";
-      } else if (isOrganizerEmail(normalizedEmail)) {
-        assignedRole = "admin";
-      }
-
-      const activeUser: AdminUser = {
-        id: `usr-${Date.now()}`,
-        email: normalizedEmail,
-        name: normalizedEmail.split("@")[0].replace(".", " ").toUpperCase(),
-        role: assignedRole,
-      };
-
-      setUser(activeUser);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(activeUser));
+      const { error } = await supabaseClient.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo: `${window.location.origin}/admin/login` },
+      });
+      if (error) return { success: false, message: error.message };
       return { success: true };
-    } catch (err: unknown) {
+    } catch (error) {
+      console.error("Google sign-in could not be started:", error);
       return {
         success: false,
-        message: err instanceof Error ? err.message : "Authentication failed.",
+        message: error instanceof Error ? error.message : "Google sign-in failed.",
       };
     } finally {
       setIsLoading(false);
     }
-  };
-
-  /**
-   * Compatibility wrapper for signIn
-   */
-  const signIn = async (email: string, targetRole: UserRole = "admin") => {
-    return signInWithEmail(email, undefined);
   };
 
   const signOut = async () => {
-    try {
-      if (auth && auth.currentUser) {
-        await firebaseSignOut(auth);
-      }
-    } catch (err) {
-      console.debug("Firebase sign out note:", err);
+    if (supabaseClient) {
+      const { error } = await supabaseClient.auth.signOut();
+      if (error) throw error;
     }
-
-    if (isSupabaseConfigured && supabaseClient) {
-      try {
-        await supabaseClient.auth.signOut();
-      } catch {
-        // ignore
-      }
-    }
-
-    localStorage.removeItem(STORAGE_KEY);
     setUser(null);
-    setFirebaseUser(null);
   };
 
-  const switchTestRole = (newRole: UserRole) => {
-    const preset = PRESET_ACCOUNTS[newRole];
-    setUser(preset);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(preset));
-  };
-
-  const role = user ? (isOrganizerEmail(user.email) ? "admin" : user.role) : null;
-  const isAuthenticated = Boolean(user);
-  const isAdmin = role === "admin";
-  const isScanner = role === "scanner" || role === "admin";
+  const role = user?.role ?? null;
 
   return (
     <AdminAuthContext.Provider
@@ -536,15 +219,12 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
         user,
         role,
         isLoading,
-        isAuthenticated,
-        isAdmin,
-        isScanner,
-        firebaseUser,
-        isFirebaseConfigured,
-        signIn,
+        isAuthenticated: Boolean(user),
+        isAdmin: role === "admin",
+        isScanner: role === "scanner" || role === "admin",
+        signInWithEmail,
         signInWithGoogle,
         signOut,
-        switchTestRole,
       }}
     >
       {children}
@@ -554,8 +234,6 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
 
 export function useAdminAuth() {
   const context = useContext(AdminAuthContext);
-  if (!context) {
-    throw new Error("useAdminAuth must be used within an AdminAuthProvider");
-  }
+  if (!context) throw new Error("useAdminAuth must be used inside AdminAuthProvider");
   return context;
 }

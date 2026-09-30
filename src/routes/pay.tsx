@@ -9,11 +9,6 @@ import {
 } from "@/components/brand/verve-logo";
 import { ArrowLeft, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  subscribeToOrder,
-  submitMpesaCodeToFirestore,
-  type FirestoreOrder,
-} from "@/lib/firebase/firestore-service";
 import { useFaviconLoading } from "@/lib/dynamic-favicon";
 
 const paySearchSchema = z.object({
@@ -53,6 +48,8 @@ interface OrderData {
   status: string;
   expiresAt: string;
   checkoutToken: string;
+  mpesaCode?: string;
+  rejectionReason?: string;
 }
 
 function PayRouteComponent() {
@@ -99,25 +96,27 @@ function PayRouteComponent() {
 
   // Authoritatively issue and verify payment via idempotency gate
   const handleVerifyCompletedPayment = useCallback(
-    async (orderId: string, token: string, receipt?: string) => {
+    async (orderId: string, token: string): Promise<boolean> => {
       try {
         const res = await fetch("/api/pay/verify", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            idempotency_key: idempotencyKey,
+            idempotency_key: `${orderId}:ticket-issue`,
             order_id: orderId,
             checkout_token: token,
-            mpesa_receipt: receipt,
           }),
         });
 
         const data = await res.json();
-        if (data.success && data.tickets && data.tickets.length > 0) {
-          setFirstTicketCode(data.tickets[0].ticketNumber);
+        if (!res.ok || !data.success || !Array.isArray(data.tickets) || data.tickets.length === 0) {
+          return false;
         }
+        setFirstTicketCode(data.tickets[0].ticketNumber);
+        return true;
       } catch (e) {
         console.warn("Could not verify tickets:", e);
+        return false;
       }
     },
     [],
@@ -153,9 +152,13 @@ function PayRouteComponent() {
         setOrder(data);
 
         if (data.status === "paid" || data.status === "approved" || data.status === "completed") {
-          setPaymentPhase("paid");
-          // Verify & retrieve tickets
-          handleVerifyCompletedPayment(data.orderId, data.checkoutToken);
+          const verified = await handleVerifyCompletedPayment(data.orderId, data.checkoutToken);
+          if (verified) {
+            setPaymentPhase("paid");
+          } else {
+            setPaymentPhase("pending_approval");
+            setPaymentError("Payment is approved, but ticket issuance could not be confirmed yet.");
+          }
         }
       } catch {
         setErrorMessage("Network error fetching order details. Please try refreshing.");
@@ -167,29 +170,65 @@ function PayRouteComponent() {
     loadOrder();
   }, [search.orderId, search.token, handleVerifyCompletedPayment]);
 
-  // Real-time Firestore Order Listener (instant updates when admin approves or status changes)
+  // Poll the authoritative order API; browser-side Firebase mirrors are not authoritative.
   useEffect(() => {
-    if (!search.orderId) return;
+    if (!search.orderId || !search.token) return;
+    let disposed = false;
+    let refreshing = false;
 
-    const unsubscribe = subscribeToOrder(search.orderId, (liveOrder: FirestoreOrder | null) => {
-      if (!liveOrder) return;
-
-      if (liveOrder.status === "approved" || liveOrder.status === "completed") {
-        setPaymentPhase("paid");
-        setMpesaReceipt(liveOrder.mpesaCode || "VERIFIED");
-        if (order?.orderId && order?.checkoutToken) {
-          handleVerifyCompletedPayment(order.orderId, order.checkoutToken, liveOrder.mpesaCode);
+    const refreshOrder = async () => {
+      if (disposed || refreshing) return;
+      refreshing = true;
+      try {
+        const query = new URLSearchParams({ token: search.token! });
+        const response = await fetch(
+          `/api/orders/${encodeURIComponent(search.orderId!)}?${query.toString()}`,
+        );
+        if (!response.ok) {
+          console.error("Could not refresh order status:", response.status);
+          return;
         }
-      } else if (liveOrder.status === "rejected") {
-        setPaymentPhase("failed");
-        setPaymentError(liveOrder.rejectionReason || "Payment was rejected during verification.");
-      }
-    });
 
-    return () => {
-      if (unsubscribe) unsubscribe();
+        const currentOrder = (await response.json()) as OrderData;
+        if (disposed) return;
+        setOrder(currentOrder);
+        if (currentOrder.mpesaCode) setMpesaReceipt(currentOrder.mpesaCode);
+
+        if (
+          currentOrder.status === "approved" ||
+          currentOrder.status === "paid" ||
+          currentOrder.status === "completed"
+        ) {
+          const issued = await handleVerifyCompletedPayment(
+            currentOrder.orderId,
+            search.token!,
+          );
+          if (issued) {
+            setPaymentPhase("paid");
+            setPaymentError(null);
+          } else {
+            setPaymentPhase("pending_approval");
+            setPaymentError("Payment was approved, but ticket issuance is not confirmed yet.");
+          }
+        } else if (currentOrder.status === "pending_approval") {
+          setPaymentPhase("pending_approval");
+        } else if (currentOrder.status === "rejected") {
+          setPaymentPhase("failed");
+          setPaymentError(currentOrder.rejectionReason || "The organizer rejected this payment claim.");
+        }
+      } catch (error) {
+        console.error("Could not refresh order status:", error);
+      } finally {
+        refreshing = false;
+      }
     };
-  }, [search.orderId, order?.orderId, order?.checkoutToken, handleVerifyCompletedPayment]);
+
+    const interval = window.setInterval(() => void refreshOrder(), 10_000);
+    return () => {
+      disposed = true;
+      window.clearInterval(interval);
+    };
+  }, [search.orderId, search.token, handleVerifyCompletedPayment]);
 
   const [isSubmittingCode, setIsSubmittingCode] = useState(false);
 
@@ -227,24 +266,6 @@ function PayRouteComponent() {
         return;
       }
 
-      // 2. Submit to Firestore to guarantee instant real-time reflection on Admin Dashboard
-      try {
-        await submitMpesaCodeToFirestore({
-          orderId: order.orderId,
-          orderNumber: order.orderNumber,
-          mpesaCode: code,
-          mpesaMessage: rawMessage || code,
-          customerEmail: buyerEmail,
-          customerName: order.buyerName,
-          customerPhone: order.buyerPhone,
-          ticketName: order.ticketName,
-          quantity: order.quantity,
-          totalKes: order.totalKes,
-        });
-      } catch (fErr) {
-        console.debug("[Firestore] Sync note:", fErr);
-      }
-
       setMpesaReceipt(code);
       setPaymentPhase("pending_approval");
     } catch {
@@ -258,19 +279,20 @@ function PayRouteComponent() {
   const handleCheckStatusAgain = async () => {
     if (!order) return;
     try {
-      const res = await fetch(
-        `/api/payments/status?order_id=${order.orderId}&token=${order.checkoutToken}`,
-        {
-          headers: {
-            Authorization: `Bearer ${order.checkoutToken}`,
-          },
-        },
-      );
+      const res = await fetch(`/api/orders/${order.orderId}?token=${order.checkoutToken}`, {
+        headers: { Authorization: `Bearer ${order.checkoutToken}` },
+      });
       const data = await res.json();
-      if (data.success && (data.orderStatus === "paid" || data.paymentStatus === "successful")) {
-        setPaymentPhase("paid");
-        setMpesaReceipt(data.mpesaReceipt);
-        handleVerifyCompletedPayment(order.orderId, order.checkoutToken, data.mpesaReceipt);
+      if (res.ok && ["paid", "approved", "completed"].includes(data.status)) {
+        const verified = await handleVerifyCompletedPayment(
+          order.orderId,
+          order.checkoutToken,
+          data.mpesaCode,
+        );
+        if (verified) {
+          setPaymentPhase("paid");
+          setMpesaReceipt(data.mpesaCode || null);
+        }
       }
     } catch {
       // noop
