@@ -21,7 +21,7 @@ import {
   Ticket,
   XCircle,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,6 +31,7 @@ import { Badge } from "@/components/ui/badge";
 import { validateAndNormalizeKenyanPhone } from "@/lib/validation/phone";
 import type { ClientOrderResponse } from "@/server/order-service";
 import { VerveBackButton, VerveIcon, VerveLogo } from "@/components/brand/verve-logo";
+import { EVENT_DETAILS } from "@/lib/catalog/ticket-catalog";
 import {
   saveOrderToFirestore,
   submitMpesaCodeToFirestore,
@@ -113,39 +114,62 @@ function Checkout() {
   const [quantity, setQuantity] = useState<number>(1);
   const [step, setStep] = useState<"select" | "details" | "payment" | "expired">("select");
 
-  // Dynamically synchronize live ticket options & pricing from server
-  useEffect(() => {
-    fetch("/api/ticket-tiers")
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.success && Array.isArray(data.tiers) && data.tiers.length > 0) {
-          const mapped: TicketOption[] = data.tiers
-            .filter(
-              (t: {
-                slug: string;
-                name: string;
-                priceKes: number;
-                admitsCount: number;
-                active?: boolean;
-              }) => t.active !== false,
-            )
-            .map((t: { slug: string; name: string; priceKes: number; admitsCount: number }) => ({
-              id: t.slug,
-              name: t.name,
-              price: t.priceKes,
-              admitsCount: t.admitsCount,
-              description:
-                t.admitsCount === 1
-                  ? "Single entry pass"
-                  : `Admits ${t.admitsCount} guests together (1 QR bundle)`,
-            }));
-          if (mapped.length > 0) {
-            setTicketOptions(mapped);
-          }
-        }
-      })
-      .catch(() => {});
+  // Live ticket pricing verification state
+  const [pricingStatus, setPricingStatus] = useState<"loading" | "verified" | "error">("loading");
+  const [pricingError, setPricingError] = useState<string | null>(null);
+
+  const verifyLivePricing = useCallback(async () => {
+    setPricingStatus("loading");
+    setPricingError(null);
+    try {
+      const res = await fetch("/api/ticket-tiers", {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+
+      if (!res.ok) {
+        throw new Error(`Organizer pricing service responded with status ${res.status}: ${res.statusText}`);
+      }
+
+      const data = await res.json();
+      if (!data || !data.success || !Array.isArray(data.tiers) || data.tiers.length === 0) {
+        throw new Error(data?.error || "Invalid response format from live pricing service.");
+      }
+
+      const mapped: TicketOption[] = data.tiers
+        .filter((t: { active?: boolean }) => t.active !== false)
+        .map((t: { slug: string; name: string; priceKes: number; admitsCount: number }) => ({
+          id: t.slug,
+          name: t.name,
+          price: t.priceKes,
+          admitsCount: t.admitsCount,
+          description:
+            t.admitsCount === 1
+              ? "Single entry pass"
+              : `Admits ${t.admitsCount} guests together (1 QR bundle)`,
+        }));
+
+      if (mapped.length > 0) {
+        setTicketOptions(mapped);
+        setPricingStatus("verified");
+        setPricingError(null);
+      } else {
+        throw new Error("No active ticket tiers returned by organizer server.");
+      }
+    } catch (err) {
+      console.error("Pricing verification failed:", err);
+      setPricingStatus("error");
+      setPricingError(
+        err instanceof Error
+          ? err.message
+          : "Unable to verify live ticket pricing. Please check your network connection.",
+      );
+    }
   }, []);
+
+  useEffect(() => {
+    verifyLivePricing();
+  }, [verifyLivePricing]);
 
   // Buyer Form State
   const [buyerName, setBuyerName] = useState("");
@@ -158,7 +182,22 @@ function Checkout() {
   // Reservation & Order State
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [activeOrder, setActiveOrder] = useState<ClientOrderResponse | null>(null);
+  const [activeOrder, setActiveOrder] = useState<ClientOrderResponse | null>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const stored = sessionStorage.getItem("rift_checkout_session");
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed && parsed.orderId && new Date(parsed.expiresAt).getTime() > Date.now()) {
+            return parsed;
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return null;
+  });
   const [secondsRemaining, setSecondsRemaining] = useState<number>(600);
 
   // Manual M-Pesa Identifier & Verification State
@@ -327,9 +366,10 @@ function Checkout() {
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
 
       let data: ClientOrderResponse | null = null;
+      let responseError: string | null = null;
       try {
         const response = await fetch("/api/orders/create", {
           method: "POST",
@@ -345,38 +385,35 @@ function Checkout() {
           signal: controller.signal,
         });
         clearTimeout(timeoutId);
-        if (response.ok) {
-          data = await response.json();
+        const resBody = await response.json().catch(() => ({}));
+        if (response.ok && resBody.success) {
+          data = resBody as ClientOrderResponse;
+        } else {
+          responseError = resBody.message || "Failed to create order reservation.";
         }
       } catch (fetchErr) {
         clearTimeout(timeoutId);
-        console.warn("Backend order creation fallback activated:", fetchErr);
+        responseError = "Network error connecting to the reservation service. Please try again.";
       }
 
-      // Robust fallback if serverless API route is delayed or unreachable
+      // If backend failed, fail gracefully and display authoritative error message
       if (!data || !data.success) {
-        const randomSuffix = Math.floor(100000 + Math.random() * 900000);
-        const orderId = `order_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-        data = {
-          success: true,
-          orderId,
-          orderNumber: `HRT-2026-${randomSuffix}`,
-          checkoutToken: `tok_${Math.random().toString(36).substring(2)}`,
-          ticketTypeId: choice.id,
-          ticketName: choice.name,
-          quantity,
-          admitsCount: choice.admitsCount,
-          totalKes: choice.priceKes * quantity,
-          buyerName: buyerName.trim(),
-          buyerPhone: phoneValidation.normalized,
-          buyerEmail: buyerEmail.trim().toLowerCase(),
-          status: "pending",
-          expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
-          ttlSeconds: 600,
-        };
+        setErrorMessage(
+          responseError ||
+            "Ticket reservation could not be completed. Please check inventory or try again.",
+        );
+        setIsSubmitting(false);
+        return;
       }
 
       setActiveOrder(data as ClientOrderResponse);
+
+      // Store in secure session storage for checkout flow (prevents leaking tokens in URLs)
+      try {
+        sessionStorage.setItem("rift_checkout_session", JSON.stringify(data));
+      } catch {
+        // ignore
+      }
 
       // Non-blocking Firestore sync to prevent any UI delay
       saveOrderToFirestore({
@@ -395,12 +432,10 @@ function Checkout() {
         console.debug("[Firestore] Order sync warning:", fErr);
       });
 
-      // Update URL query parameters for session recovery without local storage
+      // Keep clean URL without leaking sensitive checkout tokens
       navigate({
         search: {
           ticket: choice.id,
-          orderId: data.orderId,
-          token: data.checkoutToken,
         },
         replace: true,
       });
@@ -633,11 +668,56 @@ function Checkout() {
             {/* ------------------------------------------------------------- */}
             {step === "select" && (
               <div>
-                <h1 className="font-display text-4xl text-bone sm:text-5xl">Choose your ticket</h1>
-                <p className="mt-2 text-muted-foreground">
-                  Select your preferred tier. Ticket quantity is reserved for 10 minutes upon
-                  proceeding.
-                </p>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h1 className="font-display text-4xl text-bone sm:text-5xl">Choose your ticket</h1>
+                    <p className="mt-2 text-muted-foreground">
+                      Select your preferred tier. Ticket quantity is reserved for 10 minutes upon
+                      proceeding.
+                    </p>
+                  </div>
+                  {pricingStatus === "verified" && (
+                    <span className="inline-flex items-center gap-1.5 rounded border border-emerald-500/40 bg-emerald-950/30 px-2.5 py-1 font-mono text-xs text-emerald-400">
+                      <ShieldCheck className="size-3.5" />
+                      Live Verified Pricing
+                    </span>
+                  )}
+                </div>
+
+                {/* Live Pricing Loading Banner */}
+                {pricingStatus === "loading" && (
+                  <div className="mt-6 flex items-center gap-3 rounded border border-lavender/30 bg-lavender/10 p-4 text-xs font-mono text-lavender animate-pulse">
+                    <RefreshCw className="size-4 animate-spin shrink-0" />
+                    <span>Connecting to organizer server to verify live ticket pricing and inventory...</span>
+                  </div>
+                )}
+
+                {/* Explicit Pricing Error Alert with Retry */}
+                {pricingStatus === "error" && (
+                  <div className="mt-6 rounded border border-destructive/50 bg-destructive/10 p-5 text-sm text-red-200">
+                    <div className="flex items-start gap-3">
+                      <AlertCircle className="size-5 shrink-0 text-destructive mt-0.5" />
+                      <div className="space-y-2 flex-1">
+                        <strong className="block text-base font-semibold text-red-300">
+                          Live Pricing Verification Failed
+                        </strong>
+                        <p className="text-xs text-red-200/90 leading-relaxed">
+                          {pricingError || "Unable to confirm current pricing with the organizer server."} To protect ticket buyers from stale rates or allocation conflicts, checkout cannot proceed until prices are verified.
+                        </p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={verifyLivePricing}
+                          className="border-red-500/40 text-red-200 hover:bg-red-950/40 gap-2 mt-1"
+                        >
+                          <RefreshCw className="size-3.5" />
+                          Retry Pricing Verification
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 <div className="mt-8 grid gap-4" role="radiogroup" aria-label="Ticket options">
                   {ticketOptions.map((o) => {
@@ -646,12 +726,15 @@ function Checkout() {
                       <button
                         key={o.id}
                         type="button"
+                        disabled={pricingStatus !== "verified"}
                         onClick={() => {
                           setSelected(o.id);
                           setQuantity(1);
                         }}
                         className={`group relative grid min-h-24 w-full grid-cols-[minmax(0,1fr)_auto] items-center border p-5 text-left transition-all ${
-                          isSelected
+                          pricingStatus !== "verified"
+                            ? "opacity-60 cursor-not-allowed border-border/50 bg-card/50"
+                            : isSelected
                             ? "border-primary bg-oxblood/80 shadow-[0_0_24px_rgba(114,35,53,0.35)]"
                             : "border-border bg-card hover:border-lavender/40 hover:bg-card/80"
                         }`}
@@ -696,7 +779,7 @@ function Checkout() {
                         size="icon"
                         className="size-11 border-border bg-background text-bone hover:border-lavender"
                         onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-                        disabled={quantity <= 1}
+                        disabled={quantity <= 1 || pricingStatus !== "verified"}
                         aria-label="Decrease quantity"
                       >
                         <Minus className="size-4" />
@@ -710,6 +793,7 @@ function Checkout() {
                         size="icon"
                         className="size-11 border-border bg-background text-bone hover:border-lavender"
                         onClick={() => setQuantity((q) => q + 1)}
+                        disabled={pricingStatus !== "verified"}
                         aria-label="Increase quantity"
                       >
                         <Plus className="size-4" />
@@ -722,9 +806,23 @@ function Checkout() {
                   variant="event"
                   size="xl"
                   className="mt-8 w-full sm:w-auto"
-                  onClick={() => setStep("details")}
+                  disabled={pricingStatus !== "verified"}
+                  onClick={() => {
+                    if (pricingStatus !== "verified") return;
+                    setStep("details");
+                  }}
                 >
-                  Continue to Buyer Details <ChevronRight className="ml-2 size-5" />
+                  {pricingStatus === "loading" ? (
+                    <>
+                      <RefreshCw className="mr-2 size-4 animate-spin" /> Verifying Live Pricing...
+                    </>
+                  ) : pricingStatus === "error" ? (
+                    "Pricing Verification Required to Proceed"
+                  ) : (
+                    <>
+                      Continue to Buyer Details <ChevronRight className="ml-2 size-5" />
+                    </>
+                  )}
                 </Button>
               </div>
             )}
@@ -1498,7 +1596,7 @@ function Checkout() {
             </p>
             <div className="mt-4 space-y-1 text-sm text-muted-foreground border-y border-border/80 py-3">
               <p>31 October 2026 · 4:00 PM</p>
-              <p>Top Cliff Lodge, Nakuru</p>
+              <p>{EVENT_DETAILS.fullVenueString}</p>
               <p>Dress Code: Wickedly Fabulous</p>
               <p>Age: 18+ Strictly</p>
             </div>

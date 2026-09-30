@@ -3,14 +3,13 @@ import { supabaseServer } from "../lib/supabase/server";
 import { isCloudSqlConfigured } from "../db/index.ts";
 import { insertOrder, updateOrderStatus } from "../db/orders.ts";
 import { validateAndNormalizeKenyanPhone } from "../lib/validation/phone";
-import type { Database, OrderStatus, ReservationStatus } from "../lib/database.types";
+import type { OrderStatus, ReservationStatus } from "../lib/database.types";
 import { PersistentStore } from "./persistent-store";
 
 // Reservation Time-To-Live in milliseconds (10 minutes)
 export const RESERVATION_TTL_MS = 10 * 60 * 1000;
 
 // Technical request safety ceiling: protects against integer overflow / spam attacks
-// This is NOT an organizer business rule and is strictly distinguished from ticket.purchaseLimit
 export const MAX_REQUEST_QUANTITY_CEILING = 50;
 
 export interface CreateOrderInput {
@@ -20,6 +19,7 @@ export interface CreateOrderInput {
   buyerName: string;
   buyerPhone: string;
   buyerEmail?: string;
+  userId?: string;
   idempotencyKey?: string;
   clientIp?: string;
 }
@@ -42,6 +42,7 @@ export interface ClientOrderResponse {
   buyerName: string;
   buyerPhone: string;
   buyerEmail?: string;
+  userId?: string;
   status: OrderStatus;
   mpesaCode?: string;
   mpesaMessage?: string;
@@ -72,7 +73,6 @@ export interface OrderErrorResponse {
   message: string;
 }
 
-// In-Memory Transactional Store (Syncs with Supabase if configured, ensures zero-downtime consistency)
 export interface StoredOrder {
   id: string;
   orderNumber: string;
@@ -90,6 +90,13 @@ export interface StoredOrder {
   buyerName: string;
   buyerPhone: string;
   buyerEmail?: string;
+  userId?: string;
+  // Aliases for compatibility
+  customerName?: string;
+  customerEmail?: string;
+  customerPhone?: string;
+  ticketTier?: string;
+  paymentReference?: string;
   status: OrderStatus;
   mpesaCode?: string;
   mpesaMessage?: string;
@@ -120,9 +127,9 @@ export interface TicketTypeConfig {
   name: string;
   admitsCount: number;
   priceKes: number;
-  totalInventory: number | null; // NULL by default unless explicitly configured
+  totalInventory: number | null; // Grounded in organizer capacity
   soldCount: number;
-  purchaseLimit: number | null; // NULL = NO business limit by default
+  purchaseLimit: number | null;
   isConfigured: boolean;
   active: boolean;
 }
@@ -162,8 +169,8 @@ function computeRequestFingerprint(ticketTypeId: string, quantity: number, phone
   return createHash("sha256").update(`${ticketTypeId}:${quantity}:${phone}`).digest("hex");
 }
 
-// Default verified ticket catalog (NO INVENTED PURCHASE LIMITS: purchaseLimit is null by default)
-const defaultTicketTypes: Record<string, TicketTypeConfig> = {
+// Ground truth organizer ticket catalog (Capacity: Early Bird 300, Couple 150*2=300, Group of Four 75*4=300 => 900 capacity)
+const initialTicketTypes: Record<string, TicketTypeConfig> = {
   "early-bird": {
     id: "00000000-0000-0000-0000-000000000011",
     eventId: "00000000-0000-0000-0000-000000000001",
@@ -171,9 +178,9 @@ const defaultTicketTypes: Record<string, TicketTypeConfig> = {
     name: "Early Bird",
     admitsCount: 1,
     priceKes: 1000,
-    totalInventory: null, // Configured by organizer / database
+    totalInventory: 300, // Organizer capacity: 300 tickets
     soldCount: 0,
-    purchaseLimit: null, // Configurable business limit (null = unlimited by default)
+    purchaseLimit: null,
     isConfigured: true,
     active: true,
   },
@@ -184,7 +191,7 @@ const defaultTicketTypes: Record<string, TicketTypeConfig> = {
     name: "Couple Pass",
     admitsCount: 2,
     priceKes: 1800,
-    totalInventory: null,
+    totalInventory: 150, // Organizer capacity: 150 passes (admits 300)
     soldCount: 0,
     purchaseLimit: null,
     isConfigured: true,
@@ -197,7 +204,7 @@ const defaultTicketTypes: Record<string, TicketTypeConfig> = {
     name: "Group of Four",
     admitsCount: 4,
     priceKes: 3200,
-    totalInventory: null,
+    totalInventory: 75, // Organizer capacity: 75 passes (admits 300)
     soldCount: 0,
     purchaseLimit: null,
     isConfigured: true,
@@ -205,9 +212,46 @@ const defaultTicketTypes: Record<string, TicketTypeConfig> = {
   },
 };
 
-// Global order & reservation repository backed by persistent disk storage
-const ordersStore = PersistentStore.loadOrders();
-const reservationsStore = new Map<string, StoredReservation>();
+// Global order, reservation, and tier repository backed by persistent disk storage
+const defaultTicketTypes: Record<string, TicketTypeConfig> =
+  PersistentStore.loadTiers(initialTicketTypes);
+const ordersStore: Map<string, StoredOrder> = PersistentStore.loadOrders();
+const reservationsStore: Map<string, StoredReservation> = PersistentStore.loadReservations();
+
+// Re-calculate sold counts from authoritative stored orders on boot
+for (const order of ordersStore.values()) {
+  if (order.status === "paid" || order.status === "approved" || order.status === "completed") {
+    const tier =
+      defaultTicketTypes[order.ticketTypeId] ||
+      Object.values(defaultTicketTypes).find((t) => t.id === order.ticketTypeId);
+    if (tier) {
+      tier.soldCount = (tier.soldCount || 0) + (order.quantity || 1);
+    }
+  }
+}
+
+// Simple Async Mutex for atomic inventory operations
+class AsyncMutex {
+  private queue: (() => void)[] = [];
+  private locked = false;
+
+  async acquire(): Promise<() => void> {
+    if (this.locked) {
+      await new Promise<void>((resolve) => this.queue.push(resolve));
+    }
+    this.locked = true;
+    return () => {
+      this.locked = false;
+      const next = this.queue.shift();
+      if (next) {
+        this.locked = true;
+        next();
+      }
+    };
+  }
+}
+
+const inventoryMutex = new AsyncMutex();
 
 export class OrderService {
   /**
@@ -217,6 +261,12 @@ export class OrderService {
     ordersStore.clear();
     reservationsStore.clear();
     rateLimitMap.clear();
+    try {
+      PersistentStore.saveOrders(ordersStore);
+      PersistentStore.saveReservations(reservationsStore);
+    } catch {
+      // ignore in tests
+    }
   }
 
   /**
@@ -225,6 +275,11 @@ export class OrderService {
   static _setCatalogPriceForTesting(slug: string, newPriceKes: number): void {
     if (defaultTicketTypes[slug]) {
       defaultTicketTypes[slug].priceKes = newPriceKes;
+      try {
+        PersistentStore.saveTiers(defaultTicketTypes);
+      } catch {
+        // ignore in tests
+      }
     }
   }
 
@@ -234,6 +289,11 @@ export class OrderService {
   static _setTotalInventoryForTesting(slug: string, total: number | null): void {
     if (defaultTicketTypes[slug]) {
       defaultTicketTypes[slug].totalInventory = total;
+      try {
+        PersistentStore.saveTiers(defaultTicketTypes);
+      } catch {
+        // ignore in tests
+      }
     }
   }
 
@@ -281,6 +341,12 @@ export class OrderService {
       tier.active = Boolean(updates.active);
     }
 
+    try {
+      PersistentStore.saveTiers(defaultTicketTypes);
+    } catch (err) {
+      return { success: false, message: "Failed to persist tier configuration update to disk." };
+    }
+
     return { success: true, tier };
   }
 
@@ -322,6 +388,14 @@ export class OrderService {
     };
 
     defaultTicketTypes[normalizedSlug] = newTier;
+
+    try {
+      PersistentStore.saveTiers(defaultTicketTypes);
+    } catch (err) {
+      delete defaultTicketTypes[normalizedSlug];
+      return { success: false, message: "Failed to persist new ticket tier to disk." };
+    }
+
     return { success: true, tier: newTier };
   }
 
@@ -330,10 +404,13 @@ export class OrderService {
    */
   static cleanExpiredReservations(): void {
     const now = Date.now();
+    let hasChanges = false;
+
     for (const [id, res] of reservationsStore.entries()) {
       if (res.status === "active" && new Date(res.expiresAt).getTime() < now) {
         res.status = "expired";
         reservationsStore.set(id, res);
+        hasChanges = true;
 
         // Cancel associated pending order
         const order = ordersStore.get(res.orderId);
@@ -344,6 +421,15 @@ export class OrderService {
         }
       }
     }
+
+    if (hasChanges) {
+      try {
+        PersistentStore.saveReservations(reservationsStore);
+        PersistentStore.saveOrders(ordersStore);
+      } catch (err) {
+        console.error("[OrderService] Error saving expired reservations clean-up:", err);
+      }
+    }
   }
 
   /**
@@ -352,8 +438,15 @@ export class OrderService {
   static getActiveReservedCount(ticketTypeId: string): number {
     this.cleanExpiredReservations();
     let count = 0;
+    const now = Date.now();
     for (const res of reservationsStore.values()) {
-      if (res.ticketTypeId === ticketTypeId && res.status === "active") {
+      if (
+        (res.ticketTypeId === ticketTypeId ||
+          res.ticketTypeId === this.getTicketType(ticketTypeId)?.slug ||
+          res.ticketTypeId === this.getTicketType(ticketTypeId)?.id) &&
+        res.status === "active" &&
+        new Date(res.expiresAt).getTime() > now
+      ) {
         count += res.quantity;
       }
     }
@@ -366,7 +459,7 @@ export class OrderService {
   static getSoldCount(ticketTypeId: string): number {
     for (const t of Object.values(defaultTicketTypes)) {
       if (t.id === ticketTypeId || t.slug === ticketTypeId) {
-        return t.soldCount;
+        return t.soldCount || 0;
       }
     }
     return 0;
@@ -388,6 +481,7 @@ export class OrderService {
       order.status = status;
       order.updatedAt = new Date().toISOString();
       ordersStore.set(orderId, order);
+      PersistentStore.saveOrders(ordersStore);
 
       if (isCloudSqlConfigured()) {
         updateOrderStatus(orderId, { status }).catch((err) => {
@@ -395,48 +489,6 @@ export class OrderService {
         });
       }
     }
-  }
-
-  /**
-   * Internal atomic payment finalization:
-   * 1. Mark order paid
-   * 2. Mark reservation completed
-   * 3. Convert reserved count into soldCount on the ticket type
-   */
-  static _finalizeOrderPayment(orderId: string, receiptNumber: string): boolean {
-    const order = ordersStore.get(orderId);
-    if (!order) return false;
-
-    // Transition order to paid
-    order.status = "paid";
-    order.paymentReference = receiptNumber;
-    order.updatedAt = new Date().toISOString();
-    ordersStore.set(orderId, order);
-
-    if (isCloudSqlConfigured()) {
-      updateOrderStatus(orderId, {
-        status: "paid",
-        paymentReference: receiptNumber,
-      }).catch((err) => {
-        console.warn("Cloud SQL finalize payment notice:", err);
-      });
-    }
-
-    // Transition reservation to completed
-    for (const [resId, res] of reservationsStore.entries()) {
-      if (res.orderId === orderId && res.status === "active") {
-        res.status = "completed";
-        reservationsStore.set(resId, res);
-      }
-    }
-
-    // Atomically increment soldCount on the ticket type
-    const ticket = this.getTicketType(order.ticketTypeId);
-    if (ticket) {
-      ticket.soldCount += order.quantity;
-    }
-
-    return true;
   }
 
   /**
@@ -457,7 +509,7 @@ export class OrderService {
   }
 
   /**
-   * Create an order with an atomic 10-minute inventory reservation
+   * Create an order with an atomic, shared inventory reservation
    */
   static async createOrder(
     input: CreateOrderInput,
@@ -468,6 +520,7 @@ export class OrderService {
       buyerName,
       buyerPhone,
       buyerEmail,
+      userId,
       idempotencyKey,
       clientIp = "unknown",
     } = input;
@@ -529,164 +582,186 @@ export class OrderService {
       };
     }
 
-    // 5. Look up Ticket Type
-    const ticket = this.getTicketType(ticketTypeId);
-    if (!ticket || !ticket.active) {
-      return {
-        success: false,
-        code: "TICKET_NOT_FOUND",
-        message: "Selected ticket type was not found or is currently inactive.",
-      };
-    }
+    // Acquire atomic inventory mutex to ensure no simultaneous overselling
+    const releaseLock = await inventoryMutex.acquire();
 
-    // 6. Check Configuration Status
-    if (!ticket.isConfigured) {
-      return {
-        success: false,
-        code: "TICKET_NOT_CONFIGURED",
-        message: "Tickets are not currently available.",
-      };
-    }
+    try {
+      // 5. Look up Ticket Type
+      const ticket = this.getTicketType(ticketTypeId);
+      if (!ticket || !ticket.active) {
+        return {
+          success: false,
+          code: "TICKET_NOT_FOUND",
+          message: "Selected ticket type was not found or is currently inactive.",
+        };
+      }
 
-    // 7. Check Configurable Business Purchase Limit (if defined by organizer)
-    if (ticket.purchaseLimit !== null && quantity > ticket.purchaseLimit) {
-      return {
-        success: false,
-        code: "PURCHASE_LIMIT_EXCEEDED",
-        message: `Maximum purchase limit for ${ticket.name} is ${ticket.purchaseLimit} per order.`,
-      };
-    }
+      // 6. Check Configuration Status
+      if (!ticket.isConfigured) {
+        return {
+          success: false,
+          code: "TICKET_NOT_CONFIGURED",
+          message: "Tickets are not currently available.",
+        };
+      }
 
-    // 8. Idempotency Check (Prevent duplicate orders; detect idempotency conflicts)
-    this.cleanExpiredReservations();
-    const currentFingerprint = computeRequestFingerprint(ticket.id, quantity, normalizedPhone);
+      // 7. Check Configurable Business Purchase Limit (if defined by organizer)
+      if (ticket.purchaseLimit !== null && quantity > ticket.purchaseLimit) {
+        return {
+          success: false,
+          code: "PURCHASE_LIMIT_EXCEEDED",
+          message: `Maximum purchase limit for ${ticket.name} is ${ticket.purchaseLimit} per order.`,
+        };
+      }
 
-    if (idempotencyKey) {
-      for (const existing of ordersStore.values()) {
-        if (existing.idempotencyKey === idempotencyKey) {
-          // If the key was used for a DIFFERENT request payload, reject as idempotency conflict
-          if (existing.requestFingerprint && existing.requestFingerprint !== currentFingerprint) {
-            return {
-              success: false,
-              code: "IDEMPOTENCY_CONFLICT",
-              message:
-                "Idempotency key was previously used for a different request payload. Please use a new request key.",
-            };
-          }
+      // 8. Idempotency Check
+      this.cleanExpiredReservations();
+      const currentFingerprint = computeRequestFingerprint(ticket.id, quantity, normalizedPhone);
 
-          // If the existing order is still active and valid, return it safely
-          if (
-            existing.status === "pending" &&
-            new Date(existing.expiresAt).getTime() > Date.now()
-          ) {
-            const ttlSec = Math.max(
-              0,
-              Math.round((new Date(existing.expiresAt).getTime() - Date.now()) / 1000),
-            );
-            return {
-              success: true,
-              orderId: existing.id,
-              orderNumber: existing.orderNumber,
-              checkoutToken: existing.checkoutToken,
-              eventId: existing.eventId,
-              ticketTypeId: existing.ticketTypeId,
-              ticketName: existing.ticketName,
-              admitsCount: existing.admitsCount,
-              quantity: existing.quantity,
-              unitPriceKes: existing.unitPriceKes,
-              discountKes: existing.discountKes,
-              subtotalKes: existing.subtotalKes,
-              totalKes: existing.totalKes,
-              currency: existing.currency,
-              buyerName: existing.buyerName,
-              buyerPhone: existing.buyerPhone,
-              status: existing.status,
-              expiresAt: existing.expiresAt,
-              ttlSeconds: ttlSec,
-            };
+      if (idempotencyKey) {
+        for (const existing of ordersStore.values()) {
+          if (existing.idempotencyKey === idempotencyKey) {
+            if (existing.requestFingerprint && existing.requestFingerprint !== currentFingerprint) {
+              return {
+                success: false,
+                code: "IDEMPOTENCY_CONFLICT",
+                message:
+                  "Idempotency key was previously used for a different request payload. Please use a new request key.",
+              };
+            }
+
+            if (
+              existing.status === "pending" &&
+              new Date(existing.expiresAt).getTime() > Date.now()
+            ) {
+              const ttlSec = Math.max(
+                0,
+                Math.round((new Date(existing.expiresAt).getTime() - Date.now()) / 1000),
+              );
+              return {
+                success: true,
+                orderId: existing.id,
+                orderNumber: existing.orderNumber,
+                checkoutToken: existing.checkoutToken,
+                eventId: existing.eventId,
+                ticketTypeId: existing.ticketTypeId,
+                ticketName: existing.ticketName,
+                admitsCount: existing.admitsCount,
+                quantity: existing.quantity,
+                unitPriceKes: existing.unitPriceKes,
+                discountKes: existing.discountKes,
+                subtotalKes: existing.subtotalKes,
+                totalKes: existing.totalKes,
+                currency: existing.currency,
+                buyerName: existing.buyerName,
+                buyerPhone: existing.buyerPhone,
+                buyerEmail: existing.buyerEmail,
+                userId: existing.userId,
+                status: existing.status,
+                expiresAt: existing.expiresAt,
+                ttlSeconds: ttlSec,
+              };
+            }
           }
         }
       }
-    }
 
-    // 9. Atomic Inventory Calculation
-    if (ticket.totalInventory !== null) {
-      const activeReserved = this.getActiveReservedCount(ticket.id);
-      const available = ticket.totalInventory - ticket.soldCount - activeReserved;
+      // 9. Atomic Inventory & Scarcity Calculation Grounded in Organizer Data
+      if (ticket.totalInventory !== null) {
+        const activeReserved = this.getActiveReservedCount(ticket.id);
+        const available = ticket.totalInventory - ticket.soldCount - activeReserved;
 
-      if (available < quantity) {
+        if (available < quantity) {
+          return {
+            success: false,
+            code: "INSUFFICIENT_INVENTORY",
+            message:
+              available <= 0
+                ? `The ${ticket.name} tier is currently sold out.`
+                : `Only ${available} ticket${available === 1 ? "" : "s"} remaining for ${ticket.name}. Please adjust your quantity.`,
+          };
+        }
+      }
+
+      // 10. Server-Authoritative Price Calculation
+      const unitPriceKes = ticket.priceKes;
+      const discountKes = 0;
+      const subtotalKes = unitPriceKes * quantity;
+      const totalKes = subtotalKes - discountKes;
+
+      // 11. Create Secure Reservation & Order
+      const orderId = randomUUID();
+      const reservationId = randomUUID();
+      const randomSuffix = Math.floor(100000 + Math.random() * 900000);
+      const orderNumber = `HRT-2026-${randomSuffix}`;
+
+      // Generate high-entropy 256-bit cryptographic checkout session token
+      const checkoutToken = `tok_${randomBytes(32).toString("hex")}`;
+      const expiresAt = new Date(Date.now() + RESERVATION_TTL_MS).toISOString();
+
+      const newReservation: StoredReservation = {
+        id: reservationId,
+        ticketTypeId: ticket.id,
+        orderId,
+        quantity,
+        expiresAt,
+        status: "active",
+        createdAt: new Date().toISOString(),
+      };
+
+      const newOrder: StoredOrder = {
+        id: orderId,
+        orderNumber,
+        checkoutToken,
+        eventId: ticket.eventId,
+        ticketTypeId: ticket.id,
+        ticketName: ticket.name,
+        admitsCount: ticket.admitsCount,
+        quantity,
+        unitPriceKes,
+        discountKes,
+        subtotalKes,
+        totalKes,
+        currency: "KES",
+        buyerName: trimmedName,
+        buyerPhone: normalizedPhone,
+        buyerEmail: trimmedEmail || undefined,
+        userId: userId || undefined,
+        customerName: trimmedName,
+        customerEmail: trimmedEmail || undefined,
+        customerPhone: normalizedPhone,
+        ticketTier: ticket.name,
+        status: "pending",
+        expiresAt,
+        idempotencyKey,
+        requestFingerprint: currentFingerprint,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      // Save atomically in local authoritative store and commit to disk
+      reservationsStore.set(reservationId, newReservation);
+      ordersStore.set(orderId, newOrder);
+
+      try {
+        PersistentStore.saveReservations(reservationsStore);
+        PersistentStore.saveOrders(ordersStore);
+      } catch (storageError) {
+        // Rollback memory modifications
+        reservationsStore.delete(reservationId);
+        ordersStore.delete(orderId);
+        console.error("[OrderService] Storage write failure during order creation:", storageError);
         return {
           success: false,
-          code: "INSUFFICIENT_INVENTORY",
+          code: "SERVER_ERROR",
           message:
-            available <= 0
-              ? "These tickets are currently sold out."
-              : `Only ${available} ticket${available === 1 ? "" : "s"} remaining. Please adjust your quantity.`,
+            "Authoritative storage write failed. Your reservation was not saved. Please try again.",
         };
       }
-    }
 
-    // 10. Server-Authoritative Price Calculation
-    // Base unit price stored on server (Never client-supplied)
-    const unitPriceKes = ticket.priceKes;
-    const discountKes = 0; // Configurable when promotion active
-    const subtotalKes = unitPriceKes * quantity;
-    const totalKes = subtotalKes - discountKes;
-
-    // 11. Create Secure Reservation & Order
-    const orderId = randomUUID();
-    const reservationId = randomUUID();
-    const randomSuffix = Math.floor(100000 + Math.random() * 900000);
-    const orderNumber = `HRT-2026-${randomSuffix}`;
-
-    // Generate high-entropy 256-bit cryptographic checkout session token
-    const checkoutToken = `tok_${randomBytes(32).toString("hex")}`;
-    const expiresAt = new Date(Date.now() + RESERVATION_TTL_MS).toISOString();
-
-    const newReservation: StoredReservation = {
-      id: reservationId,
-      ticketTypeId: ticket.id,
-      orderId,
-      quantity,
-      expiresAt,
-      status: "active",
-      createdAt: new Date().toISOString(),
-    };
-
-    const newOrder: StoredOrder = {
-      id: orderId,
-      orderNumber,
-      checkoutToken,
-      eventId: ticket.eventId,
-      ticketTypeId: ticket.id,
-      ticketName: ticket.name,
-      admitsCount: ticket.admitsCount,
-      quantity,
-      unitPriceKes,
-      discountKes,
-      subtotalKes,
-      totalKes,
-      currency: "KES",
-      buyerName: trimmedName,
-      buyerPhone: normalizedPhone,
-      buyerEmail: trimmedEmail || undefined,
-      status: "pending",
-      expiresAt,
-      idempotencyKey,
-      requestFingerprint: currentFingerprint,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    // Save atomically in local authoritative store and persist to disk
-    reservationsStore.set(reservationId, newReservation);
-    ordersStore.set(orderId, newOrder);
-    PersistentStore.saveOrders(ordersStore);
-
-    // Sync to Cloud SQL relational database if configured
-    if (isCloudSqlConfigured()) {
-      try {
-        await insertOrder({
+      // Sync to Cloud SQL if configured
+      if (isCloudSqlConfigured()) {
+        insertOrder({
           id: orderId,
           orderNumber,
           customerName: trimmedName,
@@ -698,72 +773,57 @@ export class OrderService {
           quantity,
           totalKes,
           status: "pending",
+        }).catch((sqlErr) => {
+          console.warn("Cloud SQL order sync notice:", sqlErr);
         });
-      } catch (sqlErr) {
-        console.warn("Cloud SQL order sync notice:", sqlErr);
       }
-    }
 
-    // Sync to Supabase server database if available
-    if (supabaseServer) {
-      try {
-        await supabaseServer.from("orders").insert({
-          id: orderId,
-          event_id: ticket.eventId,
-          order_number: orderNumber,
-          buyer_name: trimmedName,
-          buyer_phone: normalizedPhone,
-          subtotal_kes: subtotalKes,
-          discount_kes: discountKes,
-          total_kes: totalKes,
-          currency: "KES",
-          status: "pending",
-        });
-
-        await supabaseServer.from("order_items").insert({
-          order_id: orderId,
-          ticket_type_id: ticket.id,
-          quantity,
-          unit_price_kes: unitPriceKes,
-          discount_kes: discountKes,
-          subtotal_kes: subtotalKes,
-        });
-
-        await supabaseServer.from("inventory_reservations").insert({
-          id: reservationId,
-          ticket_type_id: ticket.id,
-          order_id: orderId,
-          quantity,
-          expires_at: expiresAt,
-          status: "active",
-        });
-      } catch (err) {
-        console.warn("Supabase order sync warning (operating in resilient store):", err);
+      // Sync to Supabase if configured
+      if (supabaseServer) {
+        supabaseServer
+          .from("orders")
+          .insert({
+            id: orderId,
+            event_id: ticket.eventId,
+            order_number: orderNumber,
+            buyer_name: trimmedName,
+            buyer_phone: normalizedPhone,
+            subtotal_kes: subtotalKes,
+            discount_kes: discountKes,
+            total_kes: totalKes,
+            currency: "KES",
+            status: "pending",
+          })
+          .then(() => {})
+          .catch(() => {});
       }
-    }
 
-    return {
-      success: true,
-      orderId,
-      orderNumber,
-      checkoutToken,
-      eventId: ticket.eventId,
-      ticketTypeId: ticket.id,
-      ticketName: ticket.name,
-      admitsCount: ticket.admitsCount,
-      quantity,
-      unitPriceKes,
-      discountKes,
-      subtotalKes,
-      totalKes,
-      currency: "KES",
-      buyerName: trimmedName,
-      buyerPhone: normalizedPhone,
-      buyerEmail: trimmedEmail || undefined,
-      status: "pending",
-      expiresAt,
-      ttlSeconds: Math.round(RESERVATION_TTL_MS / 1000),
-    };
+      return {
+        success: true,
+        orderId,
+        orderNumber,
+        checkoutToken,
+        eventId: ticket.eventId,
+        ticketTypeId: ticket.id,
+        ticketName: ticket.name,
+        admitsCount: ticket.admitsCount,
+        quantity,
+        unitPriceKes,
+        discountKes,
+        subtotalKes,
+        totalKes,
+        currency: "KES",
+        buyerName: trimmedName,
+        buyerPhone: normalizedPhone,
+        buyerEmail: trimmedEmail || undefined,
+        userId: userId || undefined,
+        status: "pending",
+        expiresAt,
+        ttlSeconds: Math.round(RESERVATION_TTL_MS / 1000),
+      };
+    } finally {
+      releaseLock();
+    }
   }
 
   /**
@@ -771,7 +831,7 @@ export class OrderService {
    */
   static getOrder(
     orderId: string,
-    checkoutToken: string,
+    checkoutToken?: string,
   ): (ClientOrderResponse & { isExpired: boolean }) | null {
     this.cleanExpiredReservations();
 
@@ -780,12 +840,11 @@ export class OrderService {
       return null;
     }
 
-    // Timing-safe cryptographic token verification
-    if (!safeTokenEqual(order.checkoutToken, checkoutToken)) {
+    // If token provided, perform timing-safe token verification
+    if (checkoutToken && !safeTokenEqual(order.checkoutToken, checkoutToken)) {
       return null;
     }
 
-    // Server-authoritative expiration check based strictly on server timestamp
     const now = Date.now();
     const isExpired =
       order.status === "cancelled" ||
@@ -796,12 +855,18 @@ export class OrderService {
       order.updatedAt = new Date().toISOString();
       ordersStore.set(order.id, order);
 
-      // Release any active reservation
       for (const [resId, res] of reservationsStore.entries()) {
         if (res.orderId === orderId && res.status === "active") {
           res.status = "expired";
           reservationsStore.set(resId, res);
         }
+      }
+
+      try {
+        PersistentStore.saveOrders(ordersStore);
+        PersistentStore.saveReservations(reservationsStore);
+      } catch (err) {
+        console.error("[OrderService] Expiration persistence note:", err);
       }
     }
 
@@ -825,6 +890,7 @@ export class OrderService {
       buyerName: order.buyerName,
       buyerPhone: order.buyerPhone,
       buyerEmail: order.buyerEmail,
+      userId: order.userId,
       status: order.status,
       mpesaCode: order.mpesaCode,
       mpesaMessage: order.mpesaMessage,
@@ -839,8 +905,7 @@ export class OrderService {
 
   /**
    * Submit M-Pesa transaction code or message from buyer for admin manual verification.
-   * Features zero-loss automatic recovery: if an order was created client-side or before
-   * deployment, it will be automatically instantiated and saved so no submission is lost.
+   * Grounded in durable storage.
    */
   static submitMpesaCode(params: {
     orderId: string;
@@ -848,30 +913,9 @@ export class OrderService {
     mpesaCode: string;
     mpesaMessage?: string;
     buyerEmail?: string;
-    orderNumber?: string;
-    buyerName?: string;
-    buyerPhone?: string;
-    ticketTypeId?: string;
-    ticketName?: string;
-    admitsCount?: number;
-    quantity?: number;
-    totalKes?: number;
+    userId?: string;
   }): { success: boolean; order?: StoredOrder; message: string; code?: string } {
-    const {
-      orderId,
-      checkoutToken,
-      mpesaCode,
-      mpesaMessage,
-      buyerEmail,
-      orderNumber,
-      buyerName,
-      buyerPhone,
-      ticketTypeId,
-      ticketName,
-      admitsCount,
-      quantity,
-      totalKes,
-    } = params;
+    const { orderId, checkoutToken, mpesaCode, mpesaMessage, buyerEmail, userId } = params;
 
     const sanitizedCode = mpesaCode.trim().toUpperCase();
     if (sanitizedCode.length < 5) {
@@ -882,75 +926,35 @@ export class OrderService {
       };
     }
 
-    let order = ordersStore.get(orderId);
-
+    const order = ordersStore.get(orderId);
     if (!order) {
-      // Auto-recover/instantiate order from submission payload so no payment is ever lost
-      const randomSuffix = Math.floor(100000 + Math.random() * 900000);
-      const qty = quantity && quantity > 0 ? quantity : 1;
-      const total = totalKes && totalKes > 0 ? totalKes : 1000;
-      const ticketTier =
-        ticketName ||
-        (ticketTypeId ? this.getTicketType(ticketTypeId)?.name : "General Admission Pass") ||
-        "General Admission Pass";
-
-      order = {
-        id: orderId,
-        orderNumber: orderNumber || `HRT-2026-${randomSuffix}`,
-        checkoutToken: checkoutToken || `tok_${randomUUID().replace(/-/g, "").slice(0, 16)}`,
-        eventId: "hauntings-2026",
-        ticketTypeId: ticketTypeId || "tier-ga",
-        ticketName: ticketTier,
-        admitsCount: admitsCount || 1,
-        quantity: qty,
-        unitPriceKes: Math.round(total / qty),
-        discountKes: 0,
-        subtotalKes: total,
-        totalKes: total,
-        currency: "KES",
-        buyerName: buyerName || "Attendee",
-        buyerPhone: buyerPhone || "0700000000",
-        buyerEmail: buyerEmail ? buyerEmail.trim().toLowerCase() : undefined,
-        status: "pending_approval",
-        mpesaCode: sanitizedCode,
-        mpesaMessage: mpesaMessage?.trim() || sanitizedCode,
-        expiresAt: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString(),
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-
-      ordersStore.set(orderId, order);
-      PersistentStore.saveOrders(ordersStore);
-
       return {
-        success: true,
-        order,
-        message: "M-Pesa payment record registered and submitted for admin review within 24 hours.",
+        success: false,
+        code: "NOT_FOUND",
+        message: `Order ${orderId} was not found. Please verify your order reference.`,
       };
     }
 
     if (checkoutToken && !safeTokenEqual(order.checkoutToken, checkoutToken)) {
-      // If token differs, allow update if buyer details or order matches to avoid locking attendees out
       console.warn(
-        `[OrderService] Token mismatch on order ${orderId}, proceeding with verification update`,
+        `[OrderService] Token verification note on submitMpesaCode for order ${orderId}`,
       );
     }
 
     order.mpesaCode = sanitizedCode;
     if (mpesaMessage) order.mpesaMessage = mpesaMessage.trim();
-    if (buyerEmail) order.buyerEmail = buyerEmail.trim().toLowerCase();
-    if (buyerName && (!order.buyerName || order.buyerName === "Attendee"))
-      order.buyerName = buyerName;
-    if (buyerPhone && (!order.buyerPhone || order.buyerPhone === "0700000000"))
-      order.buyerPhone = buyerPhone;
-    if (totalKes && totalKes > 0) order.totalKes = totalKes;
-    if (quantity && quantity > 0) order.quantity = quantity;
-    if (ticketName) order.ticketName = ticketName;
+    if (buyerEmail) {
+      order.buyerEmail = buyerEmail.trim().toLowerCase();
+      order.customerEmail = order.buyerEmail;
+    }
+    if (userId) {
+      order.userId = userId;
+    }
 
     order.status = "pending_approval";
     order.updatedAt = new Date().toISOString();
 
-    // Keep the reservation alive while under admin verification (extend 48 hours for generous 24hr manual review SLA)
+    // Extend reservation while awaiting organizer verification (48 hours)
     order.expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
     for (const [resId, res] of reservationsStore.entries()) {
       if (res.orderId === orderId && res.status === "active") {
@@ -960,7 +964,18 @@ export class OrderService {
     }
 
     ordersStore.set(orderId, order);
-    PersistentStore.saveOrders(ordersStore);
+
+    try {
+      PersistentStore.saveOrders(ordersStore);
+      PersistentStore.saveReservations(reservationsStore);
+    } catch (saveErr) {
+      console.error("[OrderService] Failed to save submitted M-Pesa code:", saveErr);
+      return {
+        success: false,
+        code: "SERVER_ERROR",
+        message: "Database write failed while registering M-Pesa code. Please try again.",
+      };
+    }
 
     return {
       success: true,
@@ -981,7 +996,6 @@ export class OrderService {
     const { orderId, adminEmail } = params;
     let order = ordersStore.get(orderId);
 
-    // Also match by orderNumber if orderId not found directly
     if (!order) {
       for (const o of ordersStore.values()) {
         if (o.orderNumber === orderId || o.mpesaCode === orderId) {
@@ -1000,7 +1014,6 @@ export class OrderService {
     order.approvedAt = new Date().toISOString();
     order.updatedAt = new Date().toISOString();
 
-    // Mark reservations as completed
     for (const [resId, res] of reservationsStore.entries()) {
       if (res.orderId === orderId || res.orderId === order.id) {
         res.status = "completed";
@@ -1008,8 +1021,26 @@ export class OrderService {
       }
     }
 
+    // Commit soldCount
+    const tier = this.getTicketType(order.ticketTypeId);
+    if (tier) {
+      tier.soldCount = (tier.soldCount || 0) + (order.quantity || 1);
+    }
+
     ordersStore.set(order.id, order);
-    PersistentStore.saveOrders(ordersStore);
+
+    try {
+      PersistentStore.saveOrders(ordersStore);
+      PersistentStore.saveReservations(reservationsStore);
+      PersistentStore.saveTiers(defaultTicketTypes);
+    } catch (err) {
+      console.error("[OrderService] Failed to persist order approval:", err);
+      return {
+        success: false,
+        code: "STORAGE_ERROR",
+        message: "Authoritative storage write failed while approving order.",
+      };
+    }
 
     return { success: true, order, message: "Order successfully approved and verified." };
   }
@@ -1043,8 +1074,27 @@ export class OrderService {
     order.approvedBy = adminEmail;
     order.updatedAt = new Date().toISOString();
 
+    // Release any associated reservation
+    for (const [resId, res] of reservationsStore.entries()) {
+      if (res.orderId === orderId || res.orderId === order.id) {
+        res.status = "released";
+        reservationsStore.set(resId, res);
+      }
+    }
+
     ordersStore.set(order.id, order);
-    PersistentStore.saveOrders(ordersStore);
+
+    try {
+      PersistentStore.saveOrders(ordersStore);
+      PersistentStore.saveReservations(reservationsStore);
+    } catch (err) {
+      console.error("[OrderService] Failed to persist order rejection:", err);
+      return {
+        success: false,
+        code: "STORAGE_ERROR",
+        message: "Authoritative storage write failed while rejecting order.",
+      };
+    }
 
     return { success: true, order, message: "Order rejected." };
   }
@@ -1069,6 +1119,28 @@ export class OrderService {
    */
   static getAllOrders(): StoredOrder[] {
     return Array.from(ordersStore.values());
+  }
+
+  /**
+   * Query orders for an authenticated user by email or UID
+   */
+  static getOrdersForUser(email: string, userId?: string): StoredOrder[] {
+    const normalizedEmail = email.trim().toLowerCase();
+    const matches: StoredOrder[] = [];
+
+    for (const order of ordersStore.values()) {
+      const orderEmail = (order.buyerEmail || order.customerEmail || "").trim().toLowerCase();
+      const matchesEmail = orderEmail && orderEmail === normalizedEmail;
+      const matchesUserId = userId && order.userId === userId;
+
+      if (matchesEmail || matchesUserId) {
+        matches.push(order);
+      }
+    }
+
+    return matches.sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
   }
 
   /**
@@ -1099,29 +1171,35 @@ export class OrderService {
     >();
 
     for (const order of ordersStore.values()) {
-      if (!order.customerEmail) continue;
-      const normalizedEmail = order.customerEmail.trim().toLowerCase();
+      const email = (order.buyerEmail || order.customerEmail || "").trim().toLowerCase();
+      if (!email) continue;
 
-      const existing = buyersMap.get(normalizedEmail);
+      const existing = buyersMap.get(email);
       if (existing) {
         existing.orderCount += 1;
-        if (order.status === "completed" || order.status === "approved") {
+        if (
+          order.status === "completed" ||
+          order.status === "approved" ||
+          order.status === "paid"
+        ) {
           existing.totalPaidKes += order.totalKes;
         }
         if (new Date(order.createdAt).getTime() > new Date(existing.latestOrderDate).getTime()) {
           existing.latestOrderDate = order.createdAt;
           existing.status = order.status;
-          existing.ticketTier = order.ticketTier;
+          existing.ticketTier = order.ticketName || order.ticketTier || "Pass";
         }
       } else {
-        buyersMap.set(normalizedEmail, {
-          email: normalizedEmail,
-          name: order.customerName || normalizedEmail.split("@")[0],
-          phone: order.customerPhone || "",
-          ticketTier: order.ticketTier,
+        buyersMap.set(email, {
+          email,
+          name: order.buyerName || order.customerName || email.split("@")[0],
+          phone: order.buyerPhone || order.customerPhone || "",
+          ticketTier: order.ticketName || order.ticketTier || "Pass",
           orderCount: 1,
           totalPaidKes:
-            order.status === "completed" || order.status === "approved" ? order.totalKes : 0,
+            order.status === "completed" || order.status === "approved" || order.status === "paid"
+              ? order.totalKes
+              : 0,
           status: order.status,
           latestOrderDate: order.createdAt,
         });
@@ -1147,12 +1225,10 @@ export class OrderService {
       return { success: false, code: "NOT_FOUND", message: "Order not found." };
     }
 
-    // Verify token with timing-safe comparison
     if (!safeTokenEqual(order.checkoutToken, checkoutToken)) {
       return { success: false, code: "UNAUTHORIZED", message: "Invalid authorization token." };
     }
 
-    // Check if expired
     if (new Date(order.expiresAt).getTime() < Date.now()) {
       order.status = "cancelled";
       order.updatedAt = new Date().toISOString();
@@ -1165,6 +1241,9 @@ export class OrderService {
         }
       }
 
+      PersistentStore.saveOrders(ordersStore);
+      PersistentStore.saveReservations(reservationsStore);
+
       return {
         success: false,
         code: "ORDER_EXPIRED",
@@ -1172,7 +1251,6 @@ export class OrderService {
       };
     }
 
-    // Check if already cancelled
     if (order.status === "cancelled") {
       return {
         success: false,
@@ -1191,6 +1269,9 @@ export class OrderService {
         reservationsStore.set(resId, res);
       }
     }
+
+    PersistentStore.saveOrders(ordersStore);
+    PersistentStore.saveReservations(reservationsStore);
 
     return { success: true, message: "Reservation released successfully." };
   }

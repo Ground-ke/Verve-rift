@@ -137,7 +137,7 @@ function AdminDashboardContent() {
     }
   };
 
-  // Synchronous hydration from localStorage prevents metrics from disappearing across tab/page switches
+  // Synchronous hydration from localStorage with explicit provisional labeling
   const [metrics, setMetrics] = useState<OverviewMetrics | null>(() => {
     if (typeof window !== "undefined") {
       try {
@@ -148,6 +148,12 @@ function AdminDashboardContent() {
       }
     }
     return null;
+  });
+  const [isProvisionalMetrics, setIsProvisionalMetrics] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      return Boolean(localStorage.getItem("rift_admin_metrics_cache"));
+    }
+    return false;
   });
   const [isLoadingMetrics, setIsLoadingMetrics] = useState(!metrics);
   const [pendingOrdersCount, setPendingOrdersCount] = useState<number>(() => {
@@ -166,19 +172,28 @@ function AdminDashboardContent() {
   // Fetch overview metrics from backend and subscribe to live Firestore updates
   const fetchMetrics = async () => {
     try {
-      const res = await fetch("/api/admin/overview");
+      const token =
+        (typeof window !== "undefined" ? sessionStorage.getItem("rift_auth_token") : null) ||
+        user?.token ||
+        "admin_session";
+      const headers = {
+        Authorization: `Bearer ${token}`,
+      };
+
+      const res = await fetch("/api/admin/overview", { headers });
       const data = await res.json();
       if (data.success) {
         const loadedMetrics: OverviewMetrics = {
           totalRevenueKes: data.totalRevenueKes ?? 0,
           totalTicketsSold: data.totalTicketsSold ?? data.totalSold ?? 0,
           checkedInCount: data.checkedInCount ?? data.totalUsed ?? 0,
-          remainingCapacity: data.remainingCapacity ?? 800,
+          remainingCapacity: data.remainingCapacity ?? 900,
           activePromotionsCount: data.activePromotionsCount ?? 4,
           activeScannersCount: data.activeScannersCount ?? 3,
           hourlySalesTrend: data.hourlySalesTrend || [],
         };
         setMetrics(loadedMetrics);
+        setIsProvisionalMetrics(false);
         try {
           localStorage.setItem("rift_admin_metrics_cache", JSON.stringify(loadedMetrics));
         } catch (_e) {
@@ -188,7 +203,7 @@ function AdminDashboardContent() {
 
       // Concurrently fetch pending orders to show pending revenue & queue size immediately
       try {
-        const pendingRes = await fetch("/api/admin/orders/pending");
+        const pendingRes = await fetch("/api/admin/orders/pending", { headers });
         const pendingData = await pendingRes.json();
         if (pendingData.success && Array.isArray(pendingData.orders)) {
           setPendingOrdersCount(pendingData.orders.length);
@@ -545,7 +560,7 @@ function AdminDashboardContent() {
                 </span>
               </div>
               <p className="text-[10px] text-muted-foreground font-mono truncate hidden sm:block">
-                Top Cliff Lodge, Nakuru · Official Organizer Console
+                The Lawns Restaurant, Nakuru · Official Organizer Console
               </p>
             </div>
           </div>
@@ -588,6 +603,25 @@ function AdminDashboardContent() {
           {/* TAB 1: OVERVIEW & REAL-TIME METRICS */}
           {activeTab === "overview" && (
             <div className="space-y-6">
+              {/* PROVISIONAL CACHE NOTICE */}
+              {isProvisionalMetrics && (
+                <div className="flex items-center justify-between border border-amber-500/40 bg-amber-950/20 px-3.5 py-2 text-xs text-amber-300 font-mono">
+                  <div className="flex items-center gap-2">
+                    <RefreshCw className="size-3.5 animate-spin text-amber-400 shrink-0" />
+                    <span>
+                      Displaying provisional cached figures while synchronizing with authoritative
+                      live database...
+                    </span>
+                  </div>
+                  <Badge
+                    variant="outline"
+                    className="border-amber-500/50 bg-amber-950/40 text-amber-300 text-[10px] font-mono shrink-0"
+                  >
+                    Provisional
+                  </Badge>
+                </div>
+              )}
+
               {/* PENDING APPROVALS ALERT BANNER */}
               {pendingOrdersCount > 0 && (
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border border-amber-500/60 bg-amber-950/40 p-4">

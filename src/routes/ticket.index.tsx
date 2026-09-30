@@ -1,8 +1,7 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 
-export const Route = createFileRoute("/ticket/demo")({
+export const Route = createFileRoute("/ticket/")({
   beforeLoad: () => {
-    // Demo routes must not be reachable in production environments
     throw redirect({ to: "/tickets" });
   },
   component: () => null,

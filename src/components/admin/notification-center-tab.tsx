@@ -62,7 +62,7 @@ export function NotificationCenterTab() {
       return `🎃 *HAUNTINGS OF THE RIFT — TICKET CONFIRMED* 🎃\n\nHey ${customerName}! Your entry pass is secured. Get ready for an unforgettable night at the Rift.\n\n🎟️ *Pass Details:* ${passTier}\n🧾 *Order ID:* ${orderId}\n\n👇 *Access Digital Pass & QR Code:*\nhttps://verve-hauntings.vercel.app/ticket/demo\n\n⚠️ *Gate Rules:* Bring valid ID. Gates open 18:00 EAT. Passes are single-entry only.`;
     }
     if (selectedTemplate === "event_reminder_24h") {
-      return `⏰ *TOMORROW AT THE RIFT* ⏰\n\nHey ${customerName}, the gates open in 24 hours for Hauntings of the Rift!\n\n📍 *Venue:* Top Cliff Lounge, Nakuru\n🚪 *Gate Opens:* 18:00 EAT\n\n👇 *Have your QR code ready at the gate:*\nhttps://verve-hauntings.vercel.app/ticket/demo\n\nStrict 21+ verification at entry. Costumes encouraged!`;
+      return `⏰ *TOMORROW AT THE RIFT* ⏰\n\nHey ${customerName}, the gates open in 24 hours for Hauntings of the Rift!\n\n📍 *Venue:* The Lawns Restaurant, Nakuru\n🚪 *Gate Opens:* 16:00 EAT\n\n👇 *Have your QR code ready at the gate:*\nhttps://verve-hauntings.vercel.app/ticket/demo\n\nStrict 18+ verification at entry. Costumes encouraged!`;
     }
     return `🧾 *REFUND PROCESSED — HAUNTINGS OF THE RIFT* 🧾\n\nHi ${customerName},\n\nYour refund for Order ${orderId} has been successfully processed.\n\nAssociated passes have been marked invalidated. Reach out to support@verve.co.ke for any assistance.`;
   };

@@ -67,7 +67,7 @@ function PrivacyPolicyPage() {
           <p className="text-sm sm:text-base text-bone-muted max-w-2xl leading-relaxed">
             Verve &amp; Co. is committed to transparent, lawful, and secure handling of your
             personal and financial data for <strong>Hauntings of the Rift</strong> (31 October 2026
-            at Top Cliff Lodge, Nakuru).
+            at The Lawns Restaurant, Nakuru).
           </p>
           <div className="text-xs font-mono text-muted-foreground pt-1">
             Last Updated: {lastUpdated} · Effective: 2026 Event Cycle
@@ -169,8 +169,8 @@ function PrivacyPolicyPage() {
             </li>
             <li>
               <strong className="text-bone">Legitimate Security Interests:</strong> To operate our
-              optical scanners at Top Cliff Lodge, prevent duplicate or counterfeit entries, and
-              safeguard event capacity (800 max).
+              optical scanners at The Lawns Restaurant, prevent duplicate or counterfeit entries, and
+              safeguard event capacity.
             </li>
             <li>
               <strong className="text-bone">Statutory Compliance:</strong> To maintain auditable
@@ -311,7 +311,7 @@ function PrivacyPolicyPage() {
               </a>
             </div>
             <div>
-              <strong>Location:</strong> Top Cliff Lodge, Nakuru, Kenya
+              <strong>Location:</strong> The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru, Kenya
             </div>
           </div>
         </section>

@@ -3,7 +3,6 @@ import { useState, useEffect } from "react";
 import { useAdminAuth } from "@/lib/auth/admin-auth-context";
 import { VerveIcon } from "@/components/brand/verve-logo";
 import {
-  KeyRound,
   Lock,
   Mail,
   ArrowRight,
@@ -13,7 +12,6 @@ import {
   LogOut,
   Eye,
   EyeOff,
-  Sparkles,
   Shield,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -40,7 +38,7 @@ function AdminLogin() {
   const { signInWithEmail, signInWithGoogle, signOut, user, isAuthenticated, isAdmin, isLoading } =
     useAdminAuth();
 
-  const [email, setEmail] = useState("verve.n.co.ke@gmail.com");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -57,7 +55,7 @@ function AdminLogin() {
     return "/admin";
   };
 
-  // If already authenticated as admin, provide instant redirect to admin dashboard
+  // If already authenticated as admin, redirect to admin dashboard
   useEffect(() => {
     if (!isLoading && isAuthenticated && isAdmin) {
       const timer = setTimeout(() => {
@@ -66,16 +64,6 @@ function AdminLogin() {
       return () => clearTimeout(timer);
     }
   }, [isLoading, isAuthenticated, isAdmin]);
-
-  // Quick fill organizer credentials
-  const handleFillOrganizerCredentials = () => {
-    setEmail("verve.n.co.ke@gmail.com");
-    setPassword("Vervepassword25rift");
-    setErrorMessage(null);
-    toast.info("Organizer credentials filled", {
-      description: "verve.n.co.ke@gmail.com / Vervepassword25rift",
-    });
-  };
 
   // 1. Sign In with Google
   const handleGoogleSignIn = async () => {
@@ -189,18 +177,14 @@ function AdminLogin() {
           </div>
         )}
 
-        {/* ========================================================================= */}
-        {/* METHOD 1: SIGN IN WITH GOOGLE */}
-        {/* ========================================================================= */}
+        {/* Sign In with Google */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-xs font-mono uppercase tracking-wider text-bone flex items-center gap-1.5 font-bold">
-              <span className="w-5 h-5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center text-[10px]">
-                1
-              </span>
+              <Shield className="w-3.5 h-3.5 text-amber-400" />
               Sign In with Google
             </span>
-            <span className="text-[10px] font-mono text-muted-foreground">Recommended</span>
+            <span className="text-[10px] font-mono text-muted-foreground">Authorized Staff</span>
           </div>
 
           <Button
@@ -249,54 +233,14 @@ function AdminLogin() {
           <div className="h-px bg-border/80 flex-1" />
         </div>
 
-        {/* ========================================================================= */}
-        {/* METHOD 2: SIGN IN WITH EMAIL */}
-        {/* ========================================================================= */}
+        {/* Sign In with Email */}
         <form onSubmit={handleSubmitEmail} className="space-y-4">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-mono uppercase tracking-wider text-bone flex items-center gap-1.5 font-bold">
-              <span className="w-5 h-5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center text-[10px]">
-                2
-              </span>
-              Sign In with Email
-            </span>
-            <button
-              type="button"
-              onClick={handleFillOrganizerCredentials}
-              className="text-[10px] text-amber-400 hover:text-amber-300 font-mono underline inline-flex items-center gap-1"
-              title="One-click fill organizer credentials"
-            >
-              <Sparkles className="w-3 h-3" />
-              Auto-fill credentials
-            </button>
-          </div>
-
-          {/* Organizer Credentials Hint Pill */}
-          <div className="p-2.5 border border-amber-500/20 bg-amber-950/20 rounded text-[11px] font-mono text-amber-200/90 space-y-1">
-            <div className="flex items-center justify-between text-[10px] text-amber-300/80 uppercase tracking-wider font-semibold">
-              <span className="flex items-center gap-1">
-                <Shield className="w-3 h-3 text-amber-400" />
-                Organizer Access Details
-              </span>
-            </div>
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-[10px]">
-              <div>
-                Email:{" "}
-                <span className="text-bone select-all font-semibold">verve.n.co.ke@gmail.com</span>
-              </div>
-              <div>
-                Password:{" "}
-                <span className="text-bone select-all font-semibold">Vervepassword25rift</span>
-              </div>
-            </div>
-          </div>
-
           <div className="space-y-1.5">
             <Label
               htmlFor="admin-email"
               className="text-xs text-lavender uppercase font-mono tracking-wider"
             >
-              Organizer Email
+              Staff / Organizer Email
             </Label>
             <div className="relative">
               <Input
@@ -304,7 +248,7 @@ function AdminLogin() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="verve.n.co.ke@gmail.com"
+                placeholder="name@verve.co.ke"
                 required
                 className="bg-background border-border text-bone font-mono text-sm pl-9"
               />
@@ -342,7 +286,7 @@ function AdminLogin() {
                 type={showPassword ? "text" : "password"}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Vervepassword25rift"
+                placeholder="••••••••••••"
                 required
                 className="bg-background border-border text-bone font-mono text-sm pl-9 pr-9"
               />
@@ -358,11 +302,11 @@ function AdminLogin() {
             {isSubmitting ? (
               <span className="flex items-center justify-center gap-2">
                 <span className="w-3.5 h-3.5 border-2 border-bone border-t-transparent rounded-full animate-spin" />
-                <span>Authenticating Organizer...</span>
+                <span>Authenticating...</span>
               </span>
             ) : (
               <span className="flex items-center justify-center gap-2">
-                <span>Sign In with Email</span>
+                <span>Sign In with Credentials</span>
                 <ArrowRight className="w-4 h-4" />
               </span>
             )}
@@ -373,8 +317,8 @@ function AdminLogin() {
         <div className="pt-2 flex items-start gap-2 text-[11px] text-muted-foreground font-mono">
           <CheckCircle2 className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
           <span>
-            Protected by Cloud Firestore access rules, rate-limited tokens, and immutable audit
-            logs.
+            Protected by Cloud Firestore access rules, server-side authorization tokens, and
+            immutable audit logs.
           </span>
         </div>
       </div>

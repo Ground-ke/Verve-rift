@@ -64,7 +64,14 @@ export function AdminReconciliationPage() {
   const fetchReconciliationData = async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/admin/reconciliation");
+      const token =
+        (typeof window !== "undefined" ? sessionStorage.getItem("rift_auth_token") : null) ||
+        "admin_session";
+      const res = await fetch("/api/admin/reconciliation", {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
       if (res.ok) {
         const data = await res.json();
         if (data.totals) setTotals(data.totals);
@@ -135,9 +142,15 @@ export function AdminReconciliationPage() {
     setRefundFeedback(null);
 
     try {
+      const token =
+        (typeof window !== "undefined" ? sessionStorage.getItem("rift_auth_token") : null) ||
+        "admin_session";
       const res = await fetch("/api/admin/refunds/process", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({
           orderId: refundOrderId || undefined,
           ticketNumber: refundTicketCode || undefined,

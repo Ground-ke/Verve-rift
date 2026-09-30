@@ -18,13 +18,13 @@ export const Route = createFileRoute("/terms")({
       {
         name: "description",
         content:
-          "Official Event Terms and Ticketing Conditions for Hauntings of the Rift at Top Cliff Lodge, Nakuru (31 October 2026).",
+          "Official Event Terms and Ticketing Conditions for Hauntings of the Rift at The Lawns Restaurant, Nakuru (31 October 2026).",
       },
       { property: "og:title", content: "Terms & Conditions — Hauntings of the Rift" },
       {
         property: "og:description",
         content:
-          "Ticketing policies, gate admission, age limits, and venue regulations at Top Cliff Lodge.",
+          "Ticketing policies, gate admission, age limits, and venue regulations at The Lawns Restaurant.",
       },
       { property: "og:type", content: "website" },
     ],
@@ -70,8 +70,7 @@ function TermsPage() {
             acceptance of these operational rules.
           </p>
           <div className="text-xs font-mono text-muted-foreground pt-1">
-            Event Date: Saturday, 31 October 2026 · Venue: Top Cliff Lodge, Nakuru · Capacity: 800
-            Max
+            Event Date: Saturday, 31 October 2026 · Venue: The Lawns Restaurant, Nakuru
           </div>
         </div>
       </section>
@@ -87,7 +86,7 @@ function TermsPage() {
           <p>
             <em>Hauntings of the Rift</em> is an immersive Halloween nightlife and costume festival
             produced and managed exclusively by <strong>Verve &amp; Co.</strong> on 31 October 2026,
-            commencing at 4:00 PM EAT at Top Cliff Lodge, Nakuru, Kenya.
+            commencing at 4:00 PM EAT at The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru, Kenya.
           </p>
         </section>
 
@@ -120,8 +119,8 @@ function TermsPage() {
           <ul className="space-y-2.5 list-disc list-inside text-xs sm:text-sm text-bone-muted pl-2">
             <li>
               <strong className="text-bone">Single-Entry QR Passes:</strong> Each digital pass
-              contains a verified cryptographic barcode. Once scanned by gate staff at Top Cliff
-              Lodge, the ticket status is irreversibly marked as <code>used</code>. Re-entry after
+              contains a verified cryptographic barcode. Once scanned by gate staff at The Lawns
+              Restaurant, the ticket status is irreversibly marked as <code>used</code>. Re-entry after
               departure is at the discretion of head security.
             </li>
             <li>
@@ -195,14 +194,14 @@ function TermsPage() {
           </p>
         </section>
 
-        {/* Section 6: Top Cliff Lodge Venue Safety & Prohibited Items */}
+        {/* Section 6: The Lawns Restaurant Venue Safety & Prohibited Items */}
         <section className="space-y-4 border-t border-border/60 pt-8">
           <h2 className="font-display text-xl sm:text-2xl text-amber-300 flex items-center gap-2">
             <span className="text-sm font-mono text-muted-foreground">06.</span>
             Venue Safety &amp; Prohibited Items
           </h2>
           <p>
-            Top Cliff Lodge is located on elevated terrain overlooking the Rift Valley. Attendees
+            The Lawns Restaurant is a garden and nightlife venue. Attendees
             must observe personal safety and follow all perimeter signage and security guard
             directions:
           </p>

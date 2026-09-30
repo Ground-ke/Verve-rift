@@ -140,7 +140,7 @@ export function AnalyticsLiveTab() {
           </div>
         </div>
         <div className="text-[11px] font-mono text-lavender/60">
-          Target: Top Cliff Lodge, Nakuru
+          Target: The Lawns Restaurant, Nakuru
         </div>
       </div>
 

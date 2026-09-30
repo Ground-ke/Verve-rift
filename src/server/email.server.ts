@@ -158,7 +158,7 @@ export function generateEventIcs({
   ticketCode,
   customerName,
   ticketTier,
-  venueName = "Top Cliff Lodge, Nakuru",
+  venueName = "The Lawns Restaurant, Nakuru",
 }: {
   ticketCode: string;
   customerName: string;
@@ -180,7 +180,7 @@ export function generateEventIcs({
     "DTEND:20261101T010000Z",
     "SUMMARY:Hauntings of the Rift: Halloween Experience by Verve & Co.",
     `DESCRIPTION:Official Ticket Pass for ${customerName}\\nRSVP Code: ${ticketCode}\\nTier: ${ticketTier}\\nVenue: ${venueName}\\nStrictly 18+ with Valid ID. Present your QR code at the entrance gate.`,
-    "LOCATION:Top Cliff Lodge, Nakuru-Nairobi Highway, Nakuru, Kenya",
+    "LOCATION:The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru, Kenya",
     "STATUS:CONFIRMED",
     "ORGANIZER;CN=Verve & Co.:mailto:verve.n.co.ke@gmail.com",
     "SEQUENCE:0",
@@ -188,7 +188,7 @@ export function generateEventIcs({
     "BEGIN:VALARM",
     "TRIGGER:-PT24H",
     "ACTION:DISPLAY",
-    "DESCRIPTION:Hauntings of the Rift begins in 24 hours at Top Cliff Lodge, Nakuru!",
+    "DESCRIPTION:Hauntings of the Rift begins in 24 hours at The Lawns Restaurant, Nakuru!",
     "END:VALARM",
     "END:VEVENT",
     "END:VCALENDAR",
@@ -243,7 +243,7 @@ export async function sendTicketConfirmationEmail(params: {
     "General Admission Pass";
   const qty = params.quantity || params.admitsCount || params.tickets?.length || 1;
   const total = params.totalKes ?? qty * 1000;
-  const venue = params.venueName || "Top Cliff Lodge, Nakuru";
+  const venue = params.venueName || "The Lawns Restaurant, Nakuru";
   const eventDate = params.eventDate || "Saturday, 31 October 2026";
   const siteUrl = getSiteBaseUrl();
   const primaryTicketUrl =
@@ -392,7 +392,7 @@ export async function sendTicketConfirmationEmail(params: {
 export async function sendEventReminder24hEmail({
   to,
   customerName,
-  venueName = "Top Cliff Lodge, Nakuru",
+  venueName = "The Lawns Restaurant, Nakuru",
   gateOpeningTime = "16:00 EAT",
   ticketTier = "General Admission Pass",
   ticketUrl = "https://hauntingsoftherift.co.ke",
@@ -572,7 +572,7 @@ export async function sendBroadcastEmail({
               You received this notice because you purchased a pass or subscribed to updates for Hauntings of the Rift.
             </p>
             <p style="color:#574E60; font-size:11px; margin:0;">
-              Top Cliff Lodge, Nakuru • 31 October 2026 • 18+ Strictly
+              The Lawns Restaurant, Nakuru • 31 October 2026 • 18+ Strictly
             </p>
           </div>
         </div>
@@ -616,7 +616,7 @@ export async function sendMpesaReceivedAcknowledgmentEmail(params: {
     total_amount: params.totalKes || 1000,
     order_url: orderUrl,
     event_date: "Saturday, 31 October 2026",
-    venue_name: "Top Cliff Lodge, Nakuru",
+    venue_name: "The Lawns Restaurant, Nakuru",
   });
 
   return dispatchEmail({

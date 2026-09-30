@@ -157,9 +157,11 @@ export const DigitalTicket: React.FC<DigitalTicketProps> = ({
   const handleAddToCalendar = () => {
     const title = encodeURIComponent("Hauntings of the Rift: Halloween Nightlife 2026");
     const details = encodeURIComponent(
-      `Verve & Co. Presents Hauntings of the Rift.\nTicket Code: ${ticket.ticketNumber}\nHolder: ${ticket.attendeeName}\nVenue: Top Cliff Lounge, Nakuru.`,
+      `Verve & Co. Presents Hauntings of the Rift.\nTicket Code: ${ticket.ticketNumber}\nHolder: ${ticket.attendeeName}\nVenue: The Lawns Restaurant, Nakuru.`,
     );
-    const location = encodeURIComponent("Top Cliff Lounge, Nakuru-Nairobi Highway, Nakuru, Kenya");
+    const location = encodeURIComponent(
+      "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru, Kenya",
+    );
     // 2026-10-31T13:00:00Z to 2026-11-01T01:00:00Z (4PM to 4AM EAT)
     const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=20261031T130000Z/20261101T010000Z&details=${details}&location=${location}`;
     window.open(url, "_blank", "noopener,noreferrer");

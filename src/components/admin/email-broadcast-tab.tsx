@@ -92,7 +92,7 @@ export function AudienceBroadcastTab() {
       setSubject("Lineup Reveal & Headliners: Hauntings of the Rift 2026");
       setHeadline("The Darkness Unveiled — Official Artist Lineup");
       setMessage(
-        "Greetings,\n\nThe veil is thinning. We are beyond excited to unveil the official sound architects performing at Hauntings of the Rift on Saturday, 31 October 2026 at Top Cliff Lodge, Nakuru.\n\nPrepare for unprecedented sound, immersive kinetic lasers, and spine-chilling electronic rhythms running from 4:00 PM till dawn.\n\nKeep your QR code passes saved to your phone or offline storage.",
+        "Greetings,\n\nThe veil is thinning. We are beyond excited to unveil the official sound architects performing at Hauntings of the Rift on Saturday, 31 October 2026 at The Lawns Restaurant, Nakuru.\n\nPrepare for unprecedented sound, immersive kinetic lasers, and spine-chilling electronic rhythms running from 4:00 PM till dawn.\n\nKeep your QR code passes saved to your phone or offline storage.",
       );
       setCtaText("View Stage Timetable");
       setCtaUrl("https://verve-hauntings.vercel.app");
@@ -100,7 +100,7 @@ export function AudienceBroadcastTab() {
       setSubject("Important Entry Instructions & Parking Guide — 31 October");
       setHeadline("Gates Open at 4:00 PM • Fast-Track Verification");
       setMessage(
-        "Important Gate & Security Details for Saturday, 31 October:\n\n1. Location: Top Cliff Lodge, along Highway, Nakuru.\n2. Entry Requirement: Physical or Digital Pass QR code with Valid Original ID (Strictly 18+).\n3. Dress Code: Wickedly Fabulous.\n4. Arrive early to experience the sunset cocktail activations and beat the entry queue.",
+        "Important Gate & Security Details for Saturday, 31 October:\n\n1. Location: The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru.\n2. Entry Requirement: Physical or Digital Pass QR code with Valid Original ID (Strictly 18+).\n3. Dress Code: Wickedly Fabulous.\n4. Arrive early to ensure swift gate check-in and beat the entry queue.",
       );
       setCtaText("Open My Pass");
       setCtaUrl("https://verve-hauntings.vercel.app/recover");

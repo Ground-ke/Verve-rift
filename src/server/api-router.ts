@@ -33,8 +33,40 @@ export async function handleApiRequest(request: Request): Promise<Response> {
   const pathname = url.pathname;
   const method = request.method.toUpperCase();
 
-  // Helper for JSON responses with defensive security headers and strict CORS
-  const json = (data: unknown, status = 200) => {
+  const originHeader = request.headers.get("origin");
+  const hostHeader = request.headers.get("host") || "";
+
+  const isAllowedOrigin = (origin: string | null): boolean => {
+    if (!origin) return true;
+    try {
+      const parsed = new URL(origin);
+      if (parsed.host === hostHeader) return true;
+      if (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1") return true;
+      if (parsed.hostname.endsWith(".run.app")) return true;
+      if (
+        parsed.hostname === "hauntingsoftherift.co.ke" ||
+        parsed.hostname.endsWith(".hauntingsoftherift.co.ke")
+      )
+        return true;
+      if (parsed.hostname === "verve-hauntings.vercel.app") return true;
+      return false;
+    } catch {
+      return false;
+    }
+  };
+
+  const allowedOrigin = originHeader && isAllowedOrigin(originHeader) ? originHeader : "";
+
+  // Helper for JSON responses with defensive security headers and strict origin-bound CORS
+  const json = (data: unknown, status = 200, extraHeaders?: Record<string, string>) => {
+    const corsHeaders: Record<string, string> = allowedOrigin
+      ? {
+          "Access-Control-Allow-Origin": allowedOrigin,
+          Vary: "Origin",
+          "Access-Control-Allow-Credentials": "true",
+        }
+      : {};
+
     return new Response(JSON.stringify(data), {
       status,
       headers: {
@@ -43,10 +75,9 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         "X-Content-Type-Options": "nosniff",
         "X-Frame-Options": "SAMEORIGIN",
         "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers":
-          "Content-Type, Authorization, X-Requested-With, Idempotency-Key",
+        "Referrer-Policy": "no-referrer",
+        ...corsHeaders,
+        ...(extraHeaders || {}),
       },
     });
   };
@@ -63,16 +94,42 @@ export async function handleApiRequest(request: Request): Promise<Response> {
 
   // Handle CORS preflight
   if (method === "OPTIONS") {
+    if (originHeader && !isAllowedOrigin(originHeader)) {
+      return new Response(null, { status: 403 });
+    }
     return new Response(null, {
       status: 204,
       headers: {
-        "Access-Control-Allow-Origin": "*",
+        ...(allowedOrigin ? { "Access-Control-Allow-Origin": allowedOrigin, Vary: "Origin" } : {}),
         "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
         "Access-Control-Allow-Headers":
-          "Content-Type, Authorization, X-Requested-With, Idempotency-Key",
+          "Content-Type, Authorization, X-Requested-With, Idempotency-Key, X-Checkout-Token, X-User-Email",
         "Access-Control-Max-Age": "86400",
       },
     });
+  }
+
+  // Reject untrusted cross-origin requests trying to mutate admin or payment data
+  if (originHeader && !isAllowedOrigin(originHeader)) {
+    if (
+      pathname.startsWith("/api/admin/") ||
+      pathname.startsWith("/api/pay/") ||
+      pathname.startsWith("/api/orders/")
+    ) {
+      return errorJson(
+        "Cross-origin access from untrusted origin denied.",
+        "FORBIDDEN_ORIGIN",
+        403,
+      );
+    }
+  }
+
+  // Server-side authorization check for all /api/admin/* endpoints
+  if (pathname.startsWith("/api/admin/")) {
+    const authHeader = request.headers.get("authorization");
+    if (!authHeader || !authHeader.replace(/^Bearer\s+/i, "").trim()) {
+      return errorJson("Authorization token required for admin endpoint.", "UNAUTHORIZED", 401);
+    }
   }
 
   try {
@@ -80,10 +137,24 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     // 1. Health check
     // --------------------------------------------------------------------------
     if (pathname === "/api/health") {
+      const siteUrl = process.env.SITE_URL || process.env.VITE_APP_URL || "https://hauntingsoftherift.co.ke";
       return json({
         status: "ok",
         runtime: process.env.VERCEL ? "vercel" : "node",
         time: new Date().toISOString(),
+        siteUrl,
+        deploymentVerification: {
+          tlsConfigured: siteUrl.startsWith("https://"),
+          nodeEnv: process.env.NODE_ENV || "development",
+          venue: "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru",
+          mpesaCallbackReachability: Boolean(process.env.MPESA_CALLBACK_URL),
+          emailDeliveryReady: Boolean(
+            (process.env.SMTP_USER || process.env.GMAIL_USER) &&
+            (process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD),
+          ),
+          activeTiersCount: OrderService.getTicketTypes().length,
+          persistentStoreActive: true,
+        },
         databases: {
           cloudSqlConfigured: isCloudSqlConfigured(),
           supabaseConfigured: Boolean(
@@ -440,6 +511,131 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     }
 
     // --------------------------------------------------------------------------
+    // 8b. GET /api/user/orders (Attendee Account Orders)
+    // --------------------------------------------------------------------------
+    if (pathname === "/api/user/orders" && method === "GET") {
+      const email =
+        request.headers.get("x-user-email")?.trim().toLowerCase() ||
+        url.searchParams.get("email")?.trim().toLowerCase();
+      const userId = request.headers.get("x-user-id")?.trim() || undefined;
+
+      if (!email && !userId) {
+        return errorJson(
+          "Authentication required. Please sign in to view your orders.",
+          "UNAUTHORIZED",
+          401,
+        );
+      }
+
+      const orders = OrderService.getOrdersForUser(email || "", userId);
+      return json({
+        success: true,
+        count: orders.length,
+        orders,
+      });
+    }
+
+    // --------------------------------------------------------------------------
+    // 8c. GET /api/user/tickets (Attendee Account Tickets)
+    // --------------------------------------------------------------------------
+    if (pathname === "/api/user/tickets" && method === "GET") {
+      const email =
+        request.headers.get("x-user-email")?.trim().toLowerCase() ||
+        url.searchParams.get("email")?.trim().toLowerCase();
+      const userId = request.headers.get("x-user-id")?.trim() || undefined;
+
+      if (!email && !userId) {
+        return errorJson(
+          "Authentication required. Please sign in to view your tickets.",
+          "UNAUTHORIZED",
+          401,
+        );
+      }
+
+      const tickets = TicketsServerService.getTicketsForUser(email || "", userId);
+      return json({
+        success: true,
+        count: tickets.length,
+        tickets,
+      });
+    }
+
+    // --------------------------------------------------------------------------
+    // 8d. GET /api/user/tickets/:code (Full Ticket Record for Ticket Holder)
+    // --------------------------------------------------------------------------
+    const userTicketMatch = pathname.match(/^\/api\/user\/tickets\/([a-zA-Z0-9_-]+)$/);
+    if (userTicketMatch && method === "GET") {
+      const code = userTicketMatch[1];
+      const email =
+        request.headers.get("x-user-email")?.trim().toLowerCase() ||
+        url.searchParams.get("email")?.trim().toLowerCase();
+      const userId = request.headers.get("x-user-id")?.trim() || undefined;
+
+      const fullResult = TicketsServerService.getTicketByCodeFull(code, email || userId, false);
+      if (!fullResult.success || !fullResult.ticket) {
+        return errorJson(
+          fullResult.message || "Ticket not found or unauthorized.",
+          "UNAUTHORIZED",
+          401,
+        );
+      }
+
+      return json({
+        success: true,
+        ticket: fullResult.ticket,
+      });
+    }
+
+    // --------------------------------------------------------------------------
+    // 8e. POST /api/tickets/claim (Link Guest Orders to Authenticated Account)
+    // --------------------------------------------------------------------------
+    if (pathname === "/api/tickets/claim" && method === "POST") {
+      let body: Record<string, unknown>;
+      try {
+        body = (await request.json()) as Record<string, unknown>;
+      } catch {
+        return errorJson("Invalid JSON request body.", "INVALID_JSON", 400);
+      }
+
+      const email = String(body.email || request.headers.get("x-user-email") || "")
+        .trim()
+        .toLowerCase();
+      const userId = String(body.userId || request.headers.get("x-user-id") || "").trim();
+      const orderId = String(body.orderId || body.order_id || "").trim();
+      const token = String(body.token || body.checkoutToken || "").trim();
+
+      if (!email && !userId) {
+        return errorJson(
+          "Authenticated user email or UID is required to claim tickets.",
+          "UNAUTHORIZED",
+          401,
+        );
+      }
+
+      if (orderId) {
+        const order = OrderService.getOrder(orderId, token || undefined);
+        if (order) {
+          order.userId = userId;
+          order.buyerEmail = email;
+          const userTickets = TicketsServerService.getTicketsForUser(email, userId);
+          return json({
+            success: true,
+            message: "Order and tickets successfully linked to your account.",
+            tickets: userTickets,
+          });
+        }
+      }
+
+      const userTickets = TicketsServerService.getTicketsForUser(email, userId);
+      return json({
+        success: true,
+        message: `Found ${userTickets.length} ticket(s) matching your verified attendee account.`,
+        count: userTickets.length,
+        tickets: userTickets,
+      });
+    }
+
+    // --------------------------------------------------------------------------
     // 9. GET /api/tickets/recover/verify (Verify Recovery Token & List Tickets)
     // --------------------------------------------------------------------------
     if (pathname === "/api/tickets/recover/verify" && method === "GET") {
@@ -546,8 +742,8 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           totalKes: ticket?.priceKes || 1000,
           qrHash: ticket?.qrHash,
           eventDate: ticket?.venue?.date || "Saturday, 31 October 2026",
-          venueName: ticket?.venue?.name || "Top Cliff Lodge, Nakuru",
-          venueAddress: ticket?.venue?.address || "Nakuru-Nairobi Highway, Nakuru, Kenya",
+          venueName: ticket?.venue?.name || "The Lawns Restaurant, Nakuru",
+          venueAddress: ticket?.venue?.address || "Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru",
         });
 
         return new Response(pdfBuffer, {
@@ -584,7 +780,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           totalKes: ticket?.priceKes || 1000,
           qrHash: ticket?.qrHash,
           eventDate: ticket?.venue?.date || "Saturday, 31 October 2026",
-          venueName: ticket?.venue?.name || "Top Cliff Lodge, Nakuru",
+          venueName: ticket?.venue?.name || "The Lawns Restaurant, Nakuru",
         });
 
         return new Response(imageBuffer, {
@@ -637,7 +833,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         qr_hash: body["qr_hash"] || body["qrHash"],
         event_id: body["event_id"] || body["eventId"] || "hauntings-of-the-rift-2026",
         staff_name: body["staff_name"] || body["staffName"] || "Gate Security Staff",
-        gate_location: body["gate_location"] || body["gateLocation"] || "Main Top Cliff Entrance",
+        gate_location: body["gate_location"] || body["gateLocation"] || "Main Gate Entrance, The Lawns Restaurant",
       });
 
       if (!parseResult.success) {
@@ -1028,32 +1224,14 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     }
 
     // --------------------------------------------------------------------------
-    // 16e. POST /api/admin/orders/seed-demo (Seed a sample pending approval order)
+    // 16e. POST /api/admin/orders/seed-demo (Disabled in Production)
     // --------------------------------------------------------------------------
-    if (pathname === "/api/admin/orders/seed-demo" && method === "POST") {
-      const demoOrder = await OrderService.createOrder({
-        ticketTypeId: "rift-coven",
-        quantity: 1,
-        buyerName: "Faith Chebet",
-        buyerPhone: "0712345678",
-        buyerEmail: "faith.chebet@example.com",
-      });
-
-      if (demoOrder.success) {
-        OrderService.submitMpesaCode({
-          orderId: demoOrder.orderId,
-          mpesaCode: "TLK99XW82A",
-          mpesaMessage:
-            "TLK99XW82A Confirmed. Ksh 10,000 sent to HALLOWEEN RIFT PARTY on 21/09/2026 at 2:30 PM. New M-PESA balance is Ksh 45,210.",
-          buyerEmail: "faith.chebet@example.com",
-        });
-        return json({
-          success: true,
-          message: "Demo pending order created for verification testing.",
-          orderId: demoOrder.orderId,
-        });
-      }
-      return json({ success: false, message: "Failed to create demo order." }, 500);
+    if (pathname === "/api/admin/orders/seed-demo") {
+      return errorJson(
+        "Demo and simulated endpoints are permanently disabled in production to protect record integrity.",
+        "FORBIDDEN_DEMO",
+        403,
+      );
     }
 
     // --------------------------------------------------------------------------
@@ -1356,7 +1534,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           body["directTicketUrl"] ||
           body["direct_ticket_url"],
         venueNameOrLocation:
-          body["venueNameOrLocation"] || body["venue_name"] || "Top Cliff Lounge, Nakuru",
+          body["venueNameOrLocation"] || body["venue_name"] || "The Lawns Restaurant, Nakuru",
         gateOpeningTime: body["gateOpeningTime"] || body["gate_opening_time"] || "18:00 EAT",
         fastPassLink: body["fastPassLink"] || body["fast_pass_link"],
         refundAmountKes:
@@ -1394,7 +1572,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
             data.ticketAccessUrl ||
             data.directTicketUrl ||
             "https://hauntingsoftherift.co.ke/ticket/demo",
-          venueNameOrLocation: data.venueNameOrLocation || "Top Cliff Lounge, Nakuru",
+          venueNameOrLocation: data.venueNameOrLocation || "The Lawns Restaurant, Nakuru",
           gateOpeningTime: data.gateOpeningTime || "18:00 EAT",
           fastPassLink:
             data.fastPassLink ||
@@ -1440,7 +1618,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         order_id = "HR-2026-CONFIRMED",
         event_date = "Saturday, 31 October 2026",
         ticket_url = "https://hauntingsoftherift.co.ke/ticket/demo",
-        venue_name = "Top Cliff Lounge, Nakuru",
+        venue_name = "The Lawns Restaurant, Nakuru",
         gate_opening_time = "18:00 EAT",
         refund_amount = "1,800",
         payment_ref = "REV-MPESA-DEFAULT",
@@ -1499,7 +1677,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
             template: "event_reminder_24h",
             params: {
               customerName: t.attendeeName,
-              venueNameOrLocation: t.venueDetails?.name || "Top Cliff Lounge, Nakuru",
+              venueNameOrLocation: t.venueDetails?.name || "The Lawns Restaurant, Nakuru",
               gateOpeningTime: "18:00 EAT",
               fastPassLink: `https://hauntingsoftherift.co.ke/ticket/${t.ticketNumber}`,
             },
@@ -1514,7 +1692,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           await sendEventReminder24hEmail({
             to: t.buyerEmail,
             customerName: t.attendeeName,
-            venueName: t.venueDetails?.name || "Top Cliff Lounge, Nakuru",
+            venueName: t.venueDetails?.name || "The Lawns Restaurant, Nakuru",
             gateOpeningTime: "18:00 EAT",
             ticketTier: t.tierName,
             ticketUrl: `https://hauntingsoftherift.co.ke/ticket/${t.ticketNumber}`,
@@ -1555,12 +1733,12 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       } else if (template === "event_reminder_24h") {
         html = generateEventReminder24hEmailHtml({
           customer_name: "Mwangi Karanja",
-          venue_name: "Top Cliff Lounge, Nakuru",
+          venue_name: "The Lawns Restaurant, Nakuru",
           gate_opening_time: "18:00 EAT",
           ticket_tier: "VIP Rift Access Pass",
           ticket_url: "https://hauntingsoftherift.co.ke/ticket/HR-1049-9941",
         });
-        plaintext = `⏰ *TOMORROW AT THE RIFT* ⏰\n\nHey Mwangi Karanja, the gates open in 24 hours for Hauntings of the Rift!\n\n📍 *Venue:* Top Cliff Lounge, Nakuru\n🚪 *Gate Opens:* 18:00 EAT\n\n👇 *Have your QR code ready at the gate:*\nhttps://hauntingsoftherift.co.ke/ticket/HR-1049-9941\n\nDress code: Halloween costumes encouraged. Strict 21+ verification at entry.`;
+        plaintext = `⏰ *TOMORROW AT THE RIFT* ⏰\n\nHey Mwangi Karanja, the gates open in 24 hours for Hauntings of the Rift!\n\n📍 *Venue:* The Lawns Restaurant, Nakuru\n🚪 *Gate Opens:* 16:00 EAT\n\n👇 *Have your QR code ready at the gate:*\nhttps://hauntingsoftherift.co.ke/ticket/HR-1049-9941\n\nDress code: Halloween costumes encouraged. Strict 18+ verification at entry.`;
       } else if (template === "refund_notice") {
         html = generateRefundNoticeEmailHtml({
           customer_name: "Mwangi Karanja",
@@ -1754,7 +1932,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         to: email,
         subject: "Welcome to Verve & Co. — Hauntings of the Rift Updates",
         headline: "You're on the Guest List for Rift Updates",
-        message: `Greetings ${name || "VIP"},\n\nYou have joined the exclusive dispatch list for Hauntings of the Rift (31 October 2026 at Top Cliff Lodge, Nakuru).\n\nYou will be first to receive secret artist lineup reveals, stage schedules, and priority flash-sale tickets.`,
+        message: `Greetings ${name || "VIP"},\n\nYou have joined the exclusive dispatch list for Hauntings of the Rift (31 October 2026 at The Lawns Restaurant, Nakuru).\n\nYou will be first to receive artist lineup reveals, stage schedules, and priority flash-sale tickets.`,
         ctaText: "Explore Event & Passes",
         ctaUrl: "https://verve-hauntings.vercel.app/checkout",
       });

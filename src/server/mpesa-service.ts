@@ -1,5 +1,6 @@
 import { randomUUID, timingSafeEqual } from "crypto";
 import { OrderService, StoredOrder } from "./order-service";
+import { TicketsServerService } from "./tickets.server";
 import { validateAndNormalizeKenyanPhone } from "../lib/validation/phone";
 import type { Database, PaymentStatus } from "../lib/database.types";
 import { supabaseServer } from "../lib/supabase/server";
@@ -581,8 +582,17 @@ export class MpesaService {
         receiptToPaymentMap.set(payment.mpesaReceiptNumber, payment.id);
       }
 
-      // Mark order paid & convert reserved inventory to sold count atomically
-      OrderService._finalizeOrderPayment(order.id, payment.mpesaReceiptNumber);
+      // Mark order paid, commit inventory, and issue tickets atomically
+      try {
+        await TicketsServerService.finalizeOrderPaymentWorkflow({
+          orderId: order.id,
+          paymentReference: payment.mpesaReceiptNumber,
+          paymentMethod: "mpesa",
+          verifiedBy: "daraja_webhook",
+        });
+      } catch (workflowErr) {
+        console.error("[MpesaService] Unified payment workflow error:", workflowErr);
+      }
 
       console.log(
         `[MpesaService] ORDER PAID: ${order.orderNumber} | Receipt: ${payment.mpesaReceiptNumber} | KES ${payment.amountKes}`,

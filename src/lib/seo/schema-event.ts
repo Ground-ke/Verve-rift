@@ -1,6 +1,9 @@
 /**
  * JSON-LD Structured Data generator for Google Rich Results (Event Schema)
+ * Uses authoritative organizer-approved event catalog and verified location data.
  */
+
+import { EVENT_DETAILS, ORGANIZER_APPROVED_TIERS } from "@/lib/catalog/ticket-catalog";
 
 export interface EventSchemaOptions {
   url?: string;
@@ -16,7 +19,7 @@ export function generateEventJsonLd(options: EventSchemaOptions = {}) {
     "@type": "Event",
     name: "Hauntings of the Rift — Halloween Nightlife 2026",
     description:
-      "A premium Halloween nightlife and sensory masquerade experience in Nakuru, presented by Verve & Co. Featuring spine-chilling immersive audio, live DJs, and curated cocktail activations at Top Cliff Lodge.",
+      "A premium Halloween nightlife and sensory masquerade experience in Nakuru, presented by Verve & Co. at The Lawns Restaurant.",
     image: [posterImage],
     startDate: "2026-10-31T16:00:00+03:00",
     endDate: "2026-11-01T04:00:00+03:00",
@@ -24,19 +27,19 @@ export function generateEventJsonLd(options: EventSchemaOptions = {}) {
     eventAttendanceMode: "https://schema.org/OfflineEventAttendanceMode",
     location: {
       "@type": "Place",
-      name: "Top Cliff Lodge",
+      name: EVENT_DETAILS.venueName,
       address: {
         "@type": "PostalAddress",
-        streetAddress: "Highway, Top Cliff Lodge, along",
-        addressLocality: "Nairobi",
+        streetAddress: EVENT_DETAILS.venueAddress,
+        addressLocality: "Nakuru",
         addressRegion: "Rift Valley",
         postalCode: "20100",
         addressCountry: "KE",
       },
       geo: {
         "@type": "GeoCoordinates",
-        latitude: -0.2833,
-        longitude: 36.0667,
+        latitude: -0.2929,
+        longitude: 36.0898,
       },
     },
     offers: {
@@ -44,57 +47,26 @@ export function generateEventJsonLd(options: EventSchemaOptions = {}) {
       url: `${siteUrl}/#tickets`,
       priceCurrency: "KES",
       lowPrice: "1000",
-      highPrice: "6500",
-      offerCount: "4",
+      highPrice: "3200",
+      offerCount: String(ORGANIZER_APPROVED_TIERS.length),
       availability: "https://schema.org/InStock",
       validFrom: "2026-08-01T00:00:00+03:00",
-      offers: [
-        {
-          "@type": "Offer",
-          name: "Early Bird",
-          price: "1000",
-          priceCurrency: "KES",
-          availability: "https://schema.org/InStock",
-          url: `${siteUrl}/checkout?tier=early-bird`,
-        },
-        {
-          "@type": "Offer",
-          name: "General Admission",
-          price: "2500",
-          priceCurrency: "KES",
-          availability: "https://schema.org/InStock",
-          url: `${siteUrl}/checkout?tier=general-admission`,
-        },
-        {
-          "@type": "Offer",
-          name: "Couple Pass",
-          price: "4500",
-          priceCurrency: "KES",
-          availability: "https://schema.org/InStock",
-          url: `${siteUrl}/checkout?tier=couple-pass`,
-        },
-        {
-          "@type": "Offer",
-          name: "Hellfire VIP",
-          price: "6500",
-          priceCurrency: "KES",
-          availability: "https://schema.org/InStock",
-          url: `${siteUrl}/checkout?tier=hellfire-vip`,
-        },
-      ],
+      offers: ORGANIZER_APPROVED_TIERS.map((tier) => ({
+        "@type": "Offer",
+        name: tier.name,
+        price: String(tier.priceKes),
+        priceCurrency: "KES",
+        availability: "https://schema.org/InStock",
+        url: `${siteUrl}/checkout?ticket=${tier.slug}`,
+      })),
     },
     organizer: {
       "@type": "Organization",
-      name: "Verve & Co.",
+      name: EVENT_DETAILS.presentedBy,
       url: "https://verve.co.ke",
       logo: `${siteUrl}/favicon.svg`,
+      email: EVENT_DETAILS.supportEmail,
     },
-    performer: [
-      {
-        "@type": "PerformingGroup",
-        name: "Verve Resident DJs & Visual Artists",
-      },
-    ],
-    typicalAgeRange: "21+",
+    typicalAgeRange: EVENT_DETAILS.ageRequirement,
   };
 }

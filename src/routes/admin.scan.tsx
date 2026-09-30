@@ -87,7 +87,7 @@ export function AdminScannerPage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [lastScanResult, setLastScanResult] = useState<ScanResultData | null>(null);
   const [staffName, setStaffName] = useState("Gate Security Staff");
-  const [gateLocation, setGateLocation] = useState("Main Top Cliff Entrance");
+  const [gateLocation, setGateLocation] = useState("Main Gate Entrance, The Lawns Restaurant");
 
   // Gate Checkin Live Stats
   const [stats, setStats] = useState({
@@ -611,7 +611,7 @@ export function AdminScannerPage() {
                   onChange={(e) => setGateLocation(e.target.value)}
                   className="px-2.5 py-1 rounded-lg bg-slate-950 border border-white/10 text-white text-xs"
                 >
-                  <option value="Main Top Cliff Entrance">Main Top Cliff Entrance</option>
+                  <option value="Main Gate Entrance, The Lawns Restaurant">Main Gate Entrance, The Lawns Restaurant</option>
                   <option value="VIP & Masquerade Fast-Track">VIP & Masquerade Fast-Track</option>
                   <option value="Backstage & Artist Gate">Backstage & Artist Gate</option>
                 </select>
