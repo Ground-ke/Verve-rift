@@ -86,7 +86,8 @@ function TermsPage() {
           <p>
             <em>Hauntings of the Rift</em> is an immersive Halloween nightlife and costume festival
             produced and managed exclusively by <strong>Verve &amp; Co.</strong> on 31 October 2026,
-            commencing at 4:00 PM EAT at The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru, Kenya.
+            commencing at 4:00 PM EAT at The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova
+            Woodlands, Nakuru, Kenya.
           </p>
         </section>
 
@@ -120,8 +121,8 @@ function TermsPage() {
             <li>
               <strong className="text-bone">Single-Entry QR Passes:</strong> Each digital pass
               contains a verified cryptographic barcode. Once scanned by gate staff at The Lawns
-              Restaurant, the ticket status is irreversibly marked as <code>used</code>. Re-entry after
-              departure is at the discretion of head security.
+              Restaurant, the ticket status is irreversibly marked as <code>used</code>. Re-entry
+              after departure is at the discretion of head security.
             </li>
             <li>
               <strong className="text-bone">Admits Count:</strong> Each ticket tier admits strictly
@@ -201,9 +202,8 @@ function TermsPage() {
             Venue Safety &amp; Prohibited Items
           </h2>
           <p>
-            The Lawns Restaurant is a garden and nightlife venue. Attendees
-            must observe personal safety and follow all perimeter signage and security guard
-            directions:
+            The Lawns Restaurant is a garden and nightlife venue. Attendees must observe personal
+            safety and follow all perimeter signage and security guard directions:
           </p>
 
           <div className="border border-red-500/30 bg-red-950/20 p-4 space-y-2 text-xs">

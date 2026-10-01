@@ -137,7 +137,8 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     // 1. Health check
     // --------------------------------------------------------------------------
     if (pathname === "/api/health") {
-      const siteUrl = process.env.SITE_URL || process.env.VITE_APP_URL || "https://hauntingsoftherift.co.ke";
+      const siteUrl =
+        process.env.SITE_URL || process.env.VITE_APP_URL || "https://hauntingsoftherift.co.ke";
       return json({
         status: "ok",
         runtime: process.env.VERCEL ? "vercel" : "node",
@@ -743,7 +744,8 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           qrHash: ticket?.qrHash,
           eventDate: ticket?.venue?.date || "Saturday, 31 October 2026",
           venueName: ticket?.venue?.name || "The Lawns Restaurant, Nakuru",
-          venueAddress: ticket?.venue?.address || "Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru",
+          venueAddress:
+            ticket?.venue?.address || "Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru",
         });
 
         return new Response(pdfBuffer, {
@@ -833,7 +835,10 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         qr_hash: body["qr_hash"] || body["qrHash"],
         event_id: body["event_id"] || body["eventId"] || "hauntings-of-the-rift-2026",
         staff_name: body["staff_name"] || body["staffName"] || "Gate Security Staff",
-        gate_location: body["gate_location"] || body["gateLocation"] || "Main Gate Entrance, The Lawns Restaurant",
+        gate_location:
+          body["gate_location"] ||
+          body["gateLocation"] ||
+          "Main Gate Entrance, The Lawns Restaurant",
       });
 
       if (!parseResult.success) {

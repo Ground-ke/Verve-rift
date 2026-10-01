@@ -169,8 +169,8 @@ function PrivacyPolicyPage() {
             </li>
             <li>
               <strong className="text-bone">Legitimate Security Interests:</strong> To operate our
-              optical scanners at The Lawns Restaurant, prevent duplicate or counterfeit entries, and
-              safeguard event capacity.
+              optical scanners at The Lawns Restaurant, prevent duplicate or counterfeit entries,
+              and safeguard event capacity.
             </li>
             <li>
               <strong className="text-bone">Statutory Compliance:</strong> To maintain auditable
@@ -311,7 +311,8 @@ function PrivacyPolicyPage() {
               </a>
             </div>
             <div>
-              <strong>Location:</strong> The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru, Kenya
+              <strong>Location:</strong> The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova
+              Woodlands, Nakuru, Kenya
             </div>
           </div>
         </section>

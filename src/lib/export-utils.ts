@@ -96,7 +96,7 @@ export function exportAttendeeListPdf(tickets: DigitalTicketRecord[]): void {
   doc.setFontSize(9);
   doc.setTextColor(220, 220, 220);
   doc.text(
-    `Generated: ${new Date().toLocaleString("en-KE")} | Venue: Top Cliff Lounge, Nakuru | Total Passes: ${tickets.length}`,
+    `Generated: ${new Date().toLocaleString("en-KE")} | Venue: The Lawns Restaurant, Nakuru | Total Passes: ${tickets.length}`,
     40,
     48,
   );

@@ -128,7 +128,9 @@ function Checkout() {
       });
 
       if (!res.ok) {
-        throw new Error(`Organizer pricing service responded with status ${res.status}: ${res.statusText}`);
+        throw new Error(
+          `Organizer pricing service responded with status ${res.status}: ${res.statusText}`,
+        );
       }
 
       const data = await res.json();
@@ -670,7 +672,9 @@ function Checkout() {
               <div>
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <h1 className="font-display text-4xl text-bone sm:text-5xl">Choose your ticket</h1>
+                    <h1 className="font-display text-4xl text-bone sm:text-5xl">
+                      Choose your ticket
+                    </h1>
                     <p className="mt-2 text-muted-foreground">
                       Select your preferred tier. Ticket quantity is reserved for 10 minutes upon
                       proceeding.
@@ -688,7 +692,9 @@ function Checkout() {
                 {pricingStatus === "loading" && (
                   <div className="mt-6 flex items-center gap-3 rounded border border-lavender/30 bg-lavender/10 p-4 text-xs font-mono text-lavender animate-pulse">
                     <RefreshCw className="size-4 animate-spin shrink-0" />
-                    <span>Connecting to organizer server to verify live ticket pricing and inventory...</span>
+                    <span>
+                      Connecting to organizer server to verify live ticket pricing and inventory...
+                    </span>
                   </div>
                 )}
 
@@ -702,7 +708,10 @@ function Checkout() {
                           Live Pricing Verification Failed
                         </strong>
                         <p className="text-xs text-red-200/90 leading-relaxed">
-                          {pricingError || "Unable to confirm current pricing with the organizer server."} To protect ticket buyers from stale rates or allocation conflicts, checkout cannot proceed until prices are verified.
+                          {pricingError ||
+                            "Unable to confirm current pricing with the organizer server."}{" "}
+                          To protect ticket buyers from stale rates or allocation conflicts,
+                          checkout cannot proceed until prices are verified.
                         </p>
                         <Button
                           type="button"
@@ -735,8 +744,8 @@ function Checkout() {
                           pricingStatus !== "verified"
                             ? "opacity-60 cursor-not-allowed border-border/50 bg-card/50"
                             : isSelected
-                            ? "border-primary bg-oxblood/80 shadow-[0_0_24px_rgba(114,35,53,0.35)]"
-                            : "border-border bg-card hover:border-lavender/40 hover:bg-card/80"
+                              ? "border-primary bg-oxblood/80 shadow-[0_0_24px_rgba(114,35,53,0.35)]"
+                              : "border-border bg-card hover:border-lavender/40 hover:bg-card/80"
                         }`}
                       >
                         <div>

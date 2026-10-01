@@ -5,22 +5,22 @@
     "orderNumber": "HRT-ORD-001",
     "ticketNumber": "HRT-DEMO-001",
     "qrHash": "HRT_SECURE_VERIFIED_HMAC_HASH_DEMO_001",
-    "tierSlug": "vip",
-    "tierName": "VIP Pass",
+    "tierSlug": "early-bird",
+    "tierName": "Early Bird",
     "admitsCount": 1,
     "attendeeName": "Sample Guest",
     "buyerEmail": "guest@example.com",
     "buyerPhone": "+254712345678",
     "status": "valid",
-    "priceKes": 2500,
+    "priceKes": 1000,
     "issuedAt": "2026-09-25T10:00:00.000Z",
     "venue": {
-      "name": "Top Cliff Lounge",
-      "address": "Nakuru-Nairobi Highway, Free Area",
+      "name": "The Lawns Restaurant",
+      "address": "Oyster-Shell Rd, opposite Sarova Woodlands",
       "city": "Nakuru, Kenya",
       "date": "Saturday, 31 October 2026",
-      "time": "4:00 PM - 4:00 AM EAT",
-      "ageRequirement": "Strictly 21+ with Valid ID"
+      "time": "4:00 PM till late",
+      "ageRequirement": "Strictly 18+ with Valid ID"
     }
   },
   {
@@ -29,22 +29,22 @@
     "orderNumber": "HR-ORD-7892",
     "ticketNumber": "HR-7892-4910",
     "qrHash": "HR_SECURE_VERIFIED_HMAC_HASH_7892_4910",
-    "tierSlug": "early-bird",
-    "tierName": "Early Bird Admission",
-    "admitsCount": 1,
+    "tierSlug": "couple-pass",
+    "tierName": "Couple Pass",
+    "admitsCount": 2,
     "attendeeName": "Alex Vance",
     "buyerEmail": "alex.vance@example.com",
     "buyerPhone": "+254722000000",
     "status": "valid",
-    "priceKes": 1000,
+    "priceKes": 1800,
     "issuedAt": "2026-09-25T10:00:00.000Z",
     "venue": {
-      "name": "Top Cliff Lounge",
-      "address": "Nakuru-Nairobi Highway, Free Area",
+      "name": "The Lawns Restaurant",
+      "address": "Oyster-Shell Rd, opposite Sarova Woodlands",
       "city": "Nakuru, Kenya",
       "date": "Saturday, 31 October 2026",
-      "time": "4:00 PM - 4:00 AM EAT",
-      "ageRequirement": "Strictly 21+ with Valid ID"
+      "time": "4:00 PM till late",
+      "ageRequirement": "Strictly 18+ with Valid ID"
     }
   },
   {
@@ -53,22 +53,22 @@
     "orderNumber": "HR26-ORD-9821",
     "ticketNumber": "HR26-VIP-9821",
     "qrHash": "HR26_SECURE_VERIFIED_HMAC_HASH_9821",
-    "tierSlug": "vip-couple",
-    "tierName": "VIP Pass (Admit 2)",
-    "admitsCount": 2,
+    "tierSlug": "group-of-four",
+    "tierName": "Group of Four",
+    "admitsCount": 4,
     "attendeeName": "Jane Doe",
     "buyerEmail": "jane.doe@example.com",
     "buyerPhone": "+254733111222",
     "status": "valid",
-    "priceKes": 4500,
+    "priceKes": 3200,
     "issuedAt": "2026-09-25T10:00:00.000Z",
     "venue": {
-      "name": "Top Cliff Lounge",
-      "address": "Nakuru-Nairobi Highway, Free Area",
+      "name": "The Lawns Restaurant",
+      "address": "Oyster-Shell Rd, opposite Sarova Woodlands",
       "city": "Nakuru, Kenya",
       "date": "Saturday, 31 October 2026",
-      "time": "4:00 PM - 4:00 AM EAT",
-      "ageRequirement": "Strictly 21+ with Valid ID"
+      "time": "4:00 PM till late",
+      "ageRequirement": "Strictly 18+ with Valid ID"
     }
   }
 ]

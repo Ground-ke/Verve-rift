@@ -119,27 +119,35 @@ export async function fetchLiveTicketTiers(): Promise<{
 
     const mappedTiers: TicketCatalogTier[] = data.tiers
       .filter((t: { active?: boolean }) => t.active !== false)
-      .map((t: { slug: string; name: string; priceKes: number; admitsCount: number; totalInventory?: number }) => {
-        const fallback = ORGANIZER_APPROVED_TIERS.find((def) => def.slug === t.slug);
-        return {
-          id: t.slug,
-          slug: t.slug,
-          name: t.name || fallback?.name || "Pass",
-          priceKes: Number(t.priceKes) || fallback?.priceKes || 1000,
-          admitsCount: Number(t.admitsCount) || fallback?.admitsCount || 1,
-          peopleLabel:
-            fallback?.peopleLabel ||
-            (t.admitsCount === 1 ? "Single entry" : `Entry for ${t.admitsCount}`),
-          note: fallback?.note || "Official release pricing",
-          description:
-            fallback?.description ||
-            (t.admitsCount === 1
-              ? "Single entry pass"
-              : `Admits ${t.admitsCount} guests together (1 QR bundle)`),
-          totalInventory: t.totalInventory,
-          active: true,
-        };
-      });
+      .map(
+        (t: {
+          slug: string;
+          name: string;
+          priceKes: number;
+          admitsCount: number;
+          totalInventory?: number;
+        }) => {
+          const fallback = ORGANIZER_APPROVED_TIERS.find((def) => def.slug === t.slug);
+          return {
+            id: t.slug,
+            slug: t.slug,
+            name: t.name || fallback?.name || "Pass",
+            priceKes: Number(t.priceKes) || fallback?.priceKes || 1000,
+            admitsCount: Number(t.admitsCount) || fallback?.admitsCount || 1,
+            peopleLabel:
+              fallback?.peopleLabel ||
+              (t.admitsCount === 1 ? "Single entry" : `Entry for ${t.admitsCount}`),
+            note: fallback?.note || "Official release pricing",
+            description:
+              fallback?.description ||
+              (t.admitsCount === 1
+                ? "Single entry pass"
+                : `Admits ${t.admitsCount} guests together (1 QR bundle)`),
+            totalInventory: t.totalInventory,
+            active: true,
+          };
+        },
+      );
 
     return {
       success: true,
