@@ -26,7 +26,12 @@ import {
 } from "../lib/validation/api-schemas";
 import { sanitizeObject } from "../lib/validation/sanitizer";
 import { isCloudSqlConfigured } from "../db/index.ts";
-import { authorizeStaffApiRequest, requiredApiRoles } from "./api-auth";
+import {
+  authorizeStaffApiRequest,
+  getAuthenticatedApiUser,
+  readBearerToken,
+  requiredApiRoles,
+} from "./api-auth";
 
 export async function handleApiRequest(request: Request): Promise<Response> {
   const url = new URL(request.url);
@@ -82,6 +87,24 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       apiRequestRole = authorization.identity.role;
     }
 
+    if (pathname === "/api/user/tickets" && method === "GET") {
+      const token = readBearerToken(request);
+      if (!token) {
+        return errorJson("A valid bearer token is required.", "UNAUTHORIZED", 401);
+      }
+      try {
+        const user = await getAuthenticatedApiUser(token);
+        if (!user) {
+          return errorJson("The access token is invalid or expired.", "UNAUTHORIZED", 401);
+        }
+        const tickets = await TicketsServerService.getTicketsForUser(user.email);
+        return json({ success: true, count: tickets.length, tickets });
+      } catch (error) {
+        console.error("Could not retrieve authenticated user's tickets:", error);
+        return errorJson("Ticket records are temporarily unavailable.", "SERVICE_UNAVAILABLE", 503);
+      }
+    }
+
     // --------------------------------------------------------------------------
     // 1. Health check
     // --------------------------------------------------------------------------
@@ -102,8 +125,8 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         services: {
           manualMpesaConfigured: Boolean(
             process.env.VITE_MPESA_PAYBILL &&
-              process.env.VITE_MPESA_ACCOUNT &&
-              process.env.VITE_MPESA_ACCOUNT_NAME,
+            process.env.VITE_MPESA_ACCOUNT &&
+            process.env.VITE_MPESA_ACCOUNT_NAME,
           ),
           gmailSmtpConfigured: Boolean(
             (process.env.SMTP_USER ||
@@ -211,13 +234,6 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           body["mpesaMessage"] ||
           "",
       );
-      const buyerEmail =
-        body["buyer_email"] || body["buyerEmail"]
-          ? String(body["buyer_email"] || body["buyerEmail"])
-              .trim()
-              .toLowerCase()
-          : undefined;
-
       if (!orderId) {
         return errorJson("order_id is required.", "INVALID_INPUT", 400);
       }
@@ -232,11 +248,11 @@ export async function handleApiRequest(request: Request): Promise<Response> {
 
       // Automatically extract 10-character uppercase alphanumeric M-Pesa code from pasted text or code
       const codeRegexMatch = rawInput.match(/\b([A-Z0-9]{10})\b/i);
-      const extractedCode = codeRegexMatch
+      const extractedCode = codeRegexMatch?.[1]
         ? codeRegexMatch[1].toUpperCase()
         : rawInput.trim().toUpperCase();
 
-      const result = OrderService.submitMpesaCode({
+      const result = await OrderService.submitMpesaCode({
         orderId,
         checkoutToken,
         mpesaCode: extractedCode,
@@ -316,7 +332,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         return errorJson("Authorization token required for order lookup.", "UNAUTHORIZED", 401);
       }
 
-      const order = OrderService.getOrder(orderId, token);
+      const order = await OrderService.getOrder(orderId, token);
       if (!order) {
         return errorJson("Order not found or authorization token invalid.", "UNAUTHORIZED", 401);
       }
@@ -342,7 +358,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         return errorJson("order_id and token are required.", "INVALID_INPUT", 400);
       }
 
-      const cancelResult = OrderService.cancelOrder(orderId, token);
+      const cancelResult = await OrderService.cancelOrder(orderId, token);
       if (!cancelResult.success) {
         let status = 400;
         if (cancelResult.code === "UNAUTHORIZED") status = 401;
@@ -401,7 +417,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         return errorJson("Recovery token parameter required.", "TOKEN_REQUIRED", 400);
       }
 
-      const verifyResult = TicketsServerService.verifyRecoveryToken(token);
+      const verifyResult = await TicketsServerService.verifyRecoveryToken(token);
       if (!verifyResult.valid) {
         return json(
           {
@@ -468,7 +484,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     const ticketMatch = pathname.match(/^\/api\/tickets\/([a-zA-Z0-9_-]+)$/);
     if (ticketMatch && method === "GET") {
       const code = ticketMatch[1];
-      const lookupResult = TicketsServerService.getTicketByCode(code);
+      const lookupResult = await TicketsServerService.getTicketByCode(code);
 
       if (!lookupResult.success || !lookupResult.ticket) {
         return errorJson(lookupResult.message || "Ticket not found.", "TICKET_NOT_FOUND", 404);
@@ -486,21 +502,24 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     const ticketPdfMatch = pathname.match(/^\/api\/tickets\/([a-zA-Z0-9_-]+)\/pdf$/);
     if (ticketPdfMatch && method === "GET") {
       const code = ticketPdfMatch[1];
-      const lookupResult = TicketsServerService.getTicketByCode(code);
+      const lookupResult = await TicketsServerService.getTicketByCode(code);
 
       const ticket = lookupResult?.ticket;
+      if (!lookupResult?.success || !ticket) {
+        return errorJson("Ticket not found.", "TICKET_NOT_FOUND", 404);
+      }
       try {
         const pdfBuffer = await generateTicketPdfBuffer({
           ticketCode: code,
-          customerName: ticket?.attendeeName || "Attendee",
-          tierName: ticket?.tierName || "General Admission Pass",
-          admitsCount: ticket?.admitsCount || 1,
-          orderNumber: ticket?.orderNumber || code,
-          totalKes: ticket?.priceKes || 1000,
-          qrHash: ticket?.qrHash,
-          eventDate: ticket?.venue?.date || "Saturday, 31 October 2026",
-          venueName: ticket?.venue?.name || "Top Cliff Lodge, Nakuru",
-          venueAddress: ticket?.venue?.address || "Nakuru-Nairobi Highway, Nakuru, Kenya",
+          customerName: ticket.attendeeName,
+          tierName: ticket.tierName,
+          admitsCount: ticket.admitsCount,
+          orderNumber: ticket.orderNumber,
+          totalKes: ticket.priceKes,
+          qrHash: ticket.qrHash,
+          eventDate: ticket.venue.date,
+          venueName: ticket.venue.name,
+          venueAddress: ticket.venue.address,
         });
 
         return new Response(pdfBuffer, {
@@ -524,20 +543,23 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     const ticketImageMatch = pathname.match(/^\/api\/tickets\/([a-zA-Z0-9_-]+)\/image$/);
     if (ticketImageMatch && method === "GET") {
       const code = ticketImageMatch[1];
-      const lookupResult = TicketsServerService.getTicketByCode(code);
+      const lookupResult = await TicketsServerService.getTicketByCode(code);
 
       const ticket = lookupResult?.ticket;
+      if (!lookupResult?.success || !ticket) {
+        return errorJson("Ticket not found.", "TICKET_NOT_FOUND", 404);
+      }
       try {
         const imageBuffer = await generateTicketPassImageBuffer({
           ticketCode: code,
-          customerName: ticket?.attendeeName || "Attendee",
-          tierName: ticket?.tierName || "General Admission Pass",
-          admitsCount: ticket?.admitsCount || 1,
-          orderNumber: ticket?.orderNumber || code,
-          totalKes: ticket?.priceKes || 1000,
-          qrHash: ticket?.qrHash,
-          eventDate: ticket?.venue?.date || "Saturday, 31 October 2026",
-          venueName: ticket?.venue?.name || "Top Cliff Lodge, Nakuru",
+          customerName: ticket.attendeeName,
+          tierName: ticket.tierName,
+          admitsCount: ticket.admitsCount,
+          orderNumber: ticket.orderNumber,
+          totalKes: ticket.priceKes,
+          qrHash: ticket.qrHash,
+          eventDate: ticket.venue.date,
+          venueName: ticket.venue.name,
         });
 
         return new Response(imageBuffer, {
@@ -590,7 +612,8 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         qr_hash: body["qr_hash"] || body["qrHash"],
         event_id: body["event_id"] || body["eventId"] || "hauntings-of-the-rift-2026",
         staff_name: body["staff_name"] || body["staffName"] || "Gate Security Staff",
-        gate_location: body["gate_location"] || body["gateLocation"] || "Main Top Cliff Entrance",
+        gate_location:
+          body["gate_location"] || body["gateLocation"] || "Main Entrance, The Lawns Restaurant",
       });
 
       if (!parseResult.success) {
@@ -748,7 +771,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     // 13. GET /api/admin/overview (Dashboard Metrics & Analytics)
     // --------------------------------------------------------------------------
     if (pathname === "/api/admin/overview" && method === "GET") {
-      const overview = AdminServerService.getOverviewMetrics();
+      const overview = await AdminServerService.getOverviewMetrics();
       return json({ success: true, ...overview });
     }
 
@@ -760,7 +783,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       const status = url.searchParams.get("status") || undefined;
       const tier = url.searchParams.get("tier") || undefined;
 
-      const tickets = AdminServerService.getTickets({ search, status, tier });
+      const tickets = await AdminServerService.getTickets({ search, status, tier });
       return json({ success: true, count: tickets.length, tickets });
     }
 
@@ -830,7 +853,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     // 16b. GET /api/admin/orders/pending (Fetch orders awaiting M-Pesa verification)
     // --------------------------------------------------------------------------
     if (pathname === "/api/admin/orders/pending" && method === "GET") {
-      const pendingOrders = OrderService.getPendingOrders();
+      const pendingOrders = await OrderService.getPendingOrders();
       return json({
         success: true,
         count: pendingOrders.length,
@@ -857,7 +880,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       }
 
       // 1. Approve order state in authoritative service
-      const approveResult = OrderService.approveOrder({
+      const approveResult = await OrderService.approveOrder({
         orderId,
         adminEmail,
       });
@@ -963,7 +986,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         return errorJson("order_id is required.", "INVALID_INPUT", 400);
       }
 
-      const rejectResult = OrderService.rejectOrder({
+      const rejectResult = await OrderService.rejectOrder({
         orderId,
         reason,
         adminEmail,
@@ -993,12 +1016,11 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       });
 
       if (demoOrder.success) {
-        OrderService.submitMpesaCode({
+        await OrderService.submitMpesaCode({
           orderId: demoOrder.orderId,
           mpesaCode: "TLK99XW82A",
           mpesaMessage:
             "TLK99XW82A Confirmed. Ksh 10,000 sent to HALLOWEEN RIFT PARTY on 21/09/2026 at 2:30 PM. New M-PESA balance is Ksh 45,210.",
-          buyerEmail: "faith.chebet@example.com",
         });
         return json({
           success: true,
@@ -1309,8 +1331,11 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           body["directTicketUrl"] ||
           body["direct_ticket_url"],
         venueNameOrLocation:
-          body["venueNameOrLocation"] || body["venue_name"] || "Top Cliff Lounge, Nakuru",
-        gateOpeningTime: body["gateOpeningTime"] || body["gate_opening_time"] || "18:00 EAT",
+          body["venueNameOrLocation"] ||
+          body["venue_name"] ||
+          "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru",
+        gateOpeningTime:
+          body["gateOpeningTime"] || body["gate_opening_time"] || "4:00 PM till late",
         fastPassLink: body["fastPassLink"] || body["fast_pass_link"],
         refundAmountKes:
           body["refundAmountKes"] || body["refund_amount_kes"] || body["refund_amount"],
@@ -1335,11 +1360,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
 
       const data = parseResult.data;
       if (apiRequestRole === "scanner" && data.templateType !== "gate_alert") {
-        return errorJson(
-          "Scanners may only dispatch gate alerts.",
-          "FORBIDDEN",
-          403,
-        );
+        return errorJson("Scanners may only dispatch gate alerts.", "FORBIDDEN", 403);
       }
       const dispatchResult = await WhatsAppNotificationService.sendNotification({
         recipientPhone: data.phone,
@@ -1354,8 +1375,10 @@ export async function handleApiRequest(request: Request): Promise<Response> {
             data.ticketAccessUrl ||
             data.directTicketUrl ||
             "https://hauntingsoftherift.co.ke/ticket/demo",
-          venueNameOrLocation: data.venueNameOrLocation || "Top Cliff Lounge, Nakuru",
-          gateOpeningTime: data.gateOpeningTime || "18:00 EAT",
+          venueNameOrLocation:
+            data.venueNameOrLocation ||
+            "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru",
+          gateOpeningTime: data.gateOpeningTime || "4:00 PM till late",
           fastPassLink:
             data.fastPassLink ||
             data.ticketAccessUrl ||
@@ -1400,8 +1423,8 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         order_id = "HR-2026-CONFIRMED",
         event_date = "Saturday, 31 October 2026",
         ticket_url = "https://hauntingsoftherift.co.ke/ticket/demo",
-        venue_name = "Top Cliff Lounge, Nakuru",
-        gate_opening_time = "18:00 EAT",
+        venue_name = "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru",
+        gate_opening_time = "4:00 PM till late",
         refund_amount = "1,800",
         payment_ref = "REV-MPESA-DEFAULT",
         refund_reason = "Customer cancellation request",
@@ -1448,7 +1471,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     // 28. POST /api/notifications/reminder-24h (Batch 24h Reminder Dispatch)
     // --------------------------------------------------------------------------
     if (pathname === "/api/notifications/reminder-24h" && method === "POST") {
-      const tickets = TicketsServerService.getAllTickets();
+      const tickets = await TicketsServerService.getAllTickets();
       const validTickets = tickets.filter((t) => t.status === "valid");
 
       const dispatched = [];
@@ -1459,8 +1482,8 @@ export async function handleApiRequest(request: Request): Promise<Response> {
             template: "event_reminder_24h",
             params: {
               customerName: t.attendeeName,
-              venueNameOrLocation: t.venueDetails?.name || "Top Cliff Lounge, Nakuru",
-              gateOpeningTime: "18:00 EAT",
+              venueNameOrLocation: t.venue.name,
+              gateOpeningTime: t.venue.time,
               fastPassLink: `https://hauntingsoftherift.co.ke/ticket/${t.ticketNumber}`,
             },
           });
@@ -1474,8 +1497,8 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           await sendEventReminder24hEmail({
             to: t.buyerEmail,
             customerName: t.attendeeName,
-            venueName: t.venueDetails?.name || "Top Cliff Lounge, Nakuru",
-            gateOpeningTime: "18:00 EAT",
+            venueName: t.venue.name,
+            gateOpeningTime: t.venue.time,
             ticketTier: t.tierName,
             ticketUrl: `https://hauntingsoftherift.co.ke/ticket/${t.ticketNumber}`,
           });
@@ -1515,12 +1538,12 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       } else if (template === "event_reminder_24h") {
         html = generateEventReminder24hEmailHtml({
           customer_name: "Mwangi Karanja",
-          venue_name: "Top Cliff Lounge, Nakuru",
-          gate_opening_time: "18:00 EAT",
+          venue_name: "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru",
+          gate_opening_time: "4:00 PM till late",
           ticket_tier: "VIP Rift Access Pass",
           ticket_url: "https://hauntingsoftherift.co.ke/ticket/HR-1049-9941",
         });
-        plaintext = `⏰ *TOMORROW AT THE RIFT* ⏰\n\nHey Mwangi Karanja, the gates open in 24 hours for Hauntings of the Rift!\n\n📍 *Venue:* Top Cliff Lounge, Nakuru\n🚪 *Gate Opens:* 18:00 EAT\n\n👇 *Have your QR code ready at the gate:*\nhttps://hauntingsoftherift.co.ke/ticket/HR-1049-9941\n\nDress code: Halloween costumes encouraged. Strict 21+ verification at entry.`;
+        plaintext = `⏰ *TOMORROW AT THE RIFT* ⏰\n\nHey Mwangi Karanja, the event is tomorrow.\n\n📍 *Venue:* The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru\n🚪 *Event time:* 4:00 PM till late\n\n👇 *Have your QR code ready at the gate:*\nhttps://hauntingsoftherift.co.ke/ticket/HR-1049-9941\n\nEntry is strictly 18+ with valid ID.`;
       } else if (template === "refund_notice") {
         html = generateRefundNoticeEmailHtml({
           customer_name: "Mwangi Karanja",
@@ -1551,8 +1574,8 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     // 30. GET /api/admin/audience (Aggregated Buyers & Subscribers Email List)
     // --------------------------------------------------------------------------
     if (pathname === "/api/admin/audience" && method === "GET") {
-      const buyers = OrderService.getTicketBuyersEmailList();
-      const tickets = TicketsServerService.getAllTickets();
+      const buyers = await OrderService.getTicketBuyersEmailList();
+      const tickets = await TicketsServerService.getAllTickets();
 
       // Aggregate counts
       const totalPurchasers = buyers.length;
@@ -1615,7 +1638,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       }
 
       // Collect target recipients based on filter
-      const allBuyers = OrderService.getTicketBuyersEmailList();
+      const allBuyers = await OrderService.getTicketBuyersEmailList();
       let recipients: string[] = [];
 
       if (targetFilter === "all") {
@@ -1669,10 +1692,15 @@ export async function handleApiRequest(request: Request): Promise<Response> {
 
       // Record in audit log if available
       try {
-        AdminServerService.logActivity({
-          actor: "Lead Organizer",
+        await AdminServerService.recordAuditLog({
+          actorEmail: request.headers.get("x-user-email") || "admin@verve.co.ke",
+          actorRole: "admin",
           action: "DISPATCH_EMAIL_BROADCAST",
-          details: `Sent broadcast "${subject}" to ${successCount} recipient(s). Filter: ${targetFilter}`,
+          targetTable: "email_broadcasts",
+          targetId: subject,
+          metadata: {
+            details: `Sent broadcast "${subject}" to ${successCount} recipient(s). Filter: ${targetFilter}`,
+          },
         });
       } catch {
         // ignore
@@ -1714,7 +1742,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         to: email,
         subject: "Welcome to Verve & Co. — Hauntings of the Rift Updates",
         headline: "You're on the Guest List for Rift Updates",
-        message: `Greetings ${name || "VIP"},\n\nYou have joined the exclusive dispatch list for Hauntings of the Rift (31 October 2026 at Top Cliff Lodge, Nakuru).\n\nYou will be first to receive secret artist lineup reveals, stage schedules, and priority flash-sale tickets.`,
+        message: `Greetings ${name || "guest"},\n\nYou have subscribed to updates for Hauntings of the Rift on 31 October 2026 at The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru.`,
         ctaText: "Explore Event & Passes",
         ctaUrl: "https://verve-hauntings.vercel.app/checkout",
       });

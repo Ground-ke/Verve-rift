@@ -2,9 +2,17 @@ import { Link } from "@tanstack/react-router";
 import { ArrowUpRight, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-export type Ticket = { name: string; price: number; people: string; note: string };
+export type Ticket = {
+  name: string;
+  price: number;
+  people: string;
+  note: string;
+  slug?: string;
+};
 
 export function TicketCard({ ticket, featured = false }: { ticket: Ticket; featured?: boolean }) {
+  const ticketParam = ticket.slug || ticket.name.toLowerCase().replaceAll(" ", "-");
+
   return (
     <article
       className={`group relative flex min-h-80 flex-col justify-between overflow-hidden border p-6 transition-transform hover:-translate-y-1 ${featured ? "border-primary bg-oxblood" : "border-border bg-card"}`}
@@ -30,7 +38,7 @@ export function TicketCard({ ticket, featured = false }: { ticket: Ticket; featu
           <p className="mt-2 text-sm text-muted-foreground">{ticket.note}</p>
         </div>
         <Button asChild variant={featured ? "bone" : "event"} size="xl" className="w-full">
-          <Link to="/checkout" search={{ ticket: ticket.name.toLowerCase().replaceAll(" ", "-") }}>
+          <Link to="/checkout" search={{ ticket: ticketParam }}>
             Get ticket <ArrowUpRight />
           </Link>
         </Button>

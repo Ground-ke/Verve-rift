@@ -24,7 +24,9 @@ interface AdminAuthContextType {
     email: string,
     password?: string,
   ) => Promise<{ success: boolean; message?: string }>;
-  signInWithGoogle: () => Promise<{ success: boolean; message?: string }>;
+  signInWithGoogle: (
+    redirectPath?: "/admin/login" | "/tickets",
+  ) => Promise<{ success: boolean; message?: string }>;
   signOut: () => Promise<void>;
 }
 
@@ -179,7 +181,7 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const signInWithGoogle = async () => {
+  const signInWithGoogle = async (redirectPath: "/admin/login" | "/tickets" = "/admin/login") => {
     if (!isSupabaseConfigured || !supabaseClient) {
       return { success: false, message: "Organizer sign-in is not configured yet." };
     }
@@ -188,7 +190,7 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
     try {
       const { error } = await supabaseClient.auth.signInWithOAuth({
         provider: "google",
-        options: { redirectTo: `${window.location.origin}/admin/login` },
+        options: { redirectTo: `${window.location.origin}${redirectPath}` },
       });
       if (error) return { success: false, message: error.message };
       return { success: true };

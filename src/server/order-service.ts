@@ -169,7 +169,7 @@ const defaultTicketTypes: Record<string, TicketTypeConfig> = {
     name: "Early Bird",
     admitsCount: 1,
     priceKes: 1000,
-    totalInventory: null, // Configured by organizer / database
+    totalInventory: 300,
     soldCount: 0,
     purchaseLimit: null, // Configurable business limit (null = unlimited by default)
     isConfigured: true,
@@ -182,7 +182,7 @@ const defaultTicketTypes: Record<string, TicketTypeConfig> = {
     name: "Couple Pass",
     admitsCount: 2,
     priceKes: 1800,
-    totalInventory: null,
+    totalInventory: 150,
     soldCount: 0,
     purchaseLimit: null,
     isConfigured: true,
@@ -194,8 +194,8 @@ const defaultTicketTypes: Record<string, TicketTypeConfig> = {
     slug: "group-of-four",
     name: "Group of Four",
     admitsCount: 4,
-    priceKes: 3600,
-    totalInventory: null,
+    priceKes: 3200,
+    totalInventory: 75,
     soldCount: 0,
     purchaseLimit: null,
     isConfigured: true,
@@ -759,7 +759,11 @@ export class OrderService {
   /**
    * Admin rejects an order with a reason
    */
-  static async rejectOrder(params: { orderId: string; reason: string; adminEmail: string }): Promise<{
+  static async rejectOrder(params: {
+    orderId: string;
+    reason: string;
+    adminEmail: string;
+  }): Promise<{
     success: boolean;
     order?: StoredOrder;
     message: string;
@@ -807,16 +811,18 @@ export class OrderService {
   /**
    * Get unique email list of ticket buyers with their metadata
    */
-  static async getTicketBuyersEmailList(): Promise<Array<{
-    email: string;
-    name: string;
-    phone: string;
-    ticketTier: string;
-    orderCount: number;
-    totalPaidKes: number;
-    status: string;
-    latestOrderDate: string;
-  }>> {
+  static async getTicketBuyersEmailList(): Promise<
+    Array<{
+      email: string;
+      name: string;
+      phone: string;
+      ticketTier: string;
+      orderCount: number;
+      totalPaidKes: number;
+      status: string;
+      latestOrderDate: string;
+    }>
+  > {
     const buyersMap = new Map<
       string,
       {

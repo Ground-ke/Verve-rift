@@ -186,11 +186,11 @@ export function TicketManagementTab() {
               scannedBy: ft.scannedBy || null,
               usedAt: ft.scannedAt || null,
               venue: {
-                name: "Top Cliff Lounge",
-                address: "Nakuru-Nairobi Highway, Free Area",
+                name: "The Lawns Restaurant",
+                address: "Oyster-Shell Rd, opposite Sarova Woodlands",
                 city: "Nakuru, Kenya",
                 date: "Saturday, 31 October 2026",
-                time: "4:00 PM - 4:00 AM EAT",
+                time: "4:00 PM till late",
               },
             });
           });

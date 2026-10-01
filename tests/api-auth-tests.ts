@@ -1,5 +1,6 @@
 import {
   createApiAuthorizer,
+  readBearerToken,
   requiredApiRoles,
   resolveSupabaseUserId,
 } from "../src/server/api-auth";
@@ -46,6 +47,15 @@ async function run() {
   assert(
     requiredApiRoles("/api/orders/order-1") === null,
     "Keep public order status flow available",
+  );
+
+  assert(
+    readBearerToken(
+      new Request("https://example.test/api/user/tickets", {
+        headers: { "X-User-Email": "attendee@example.com" },
+      }),
+    ) === null,
+    "Do not allow an email header alone to authenticate ticket access",
   );
 
   const authorizedRequest = (authorization?: string) =>

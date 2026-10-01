@@ -21,6 +21,7 @@ import { Route as TicketsRouteImport } from './routes/tickets'
 import { Route as AdminLoginRouteImport } from './routes/admin.login'
 import { Route as AdminReconciliationRouteImport } from './routes/admin.reconciliation'
 import { Route as AdminScanRouteImport } from './routes/admin.scan'
+import { Route as TicketIndexRouteImport } from './routes/ticket.index'
 import { Route as TicketCodeRouteImport } from './routes/ticket.$code'
 import { Route as TicketDemoRouteImport } from './routes/ticket.demo'
 
@@ -84,6 +85,11 @@ const AdminScanRoute = AdminScanRouteImport.update({
   path: '/scan',
   getParentRoute: () => AdminRoute,
 } as any)
+const TicketIndexRoute = TicketIndexRouteImport.update({
+  id: '/ticket/',
+  path: '/ticket/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TicketCodeRoute = TicketCodeRouteImport.update({
   id: '/ticket/$code',
   path: '/ticket/$code',
@@ -110,6 +116,7 @@ export interface FileRoutesByFullPath {
   '/admin/scan': typeof AdminScanRoute
   '/ticket/$code': typeof TicketCodeRoute
   '/ticket/demo': typeof TicketDemoRoute
+  '/ticket/': typeof TicketIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -126,6 +133,7 @@ export interface FileRoutesByTo {
   '/admin/scan': typeof AdminScanRoute
   '/ticket/$code': typeof TicketCodeRoute
   '/ticket/demo': typeof TicketDemoRoute
+  '/ticket': typeof TicketIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -143,6 +151,7 @@ export interface FileRoutesById {
   '/admin/scan': typeof AdminScanRoute
   '/ticket/$code': typeof TicketCodeRoute
   '/ticket/demo': typeof TicketDemoRoute
+  '/ticket/': typeof TicketIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -161,6 +170,7 @@ export interface FileRouteTypes {
     | '/admin/scan'
     | '/ticket/$code'
     | '/ticket/demo'
+    | '/ticket/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -177,6 +187,7 @@ export interface FileRouteTypes {
     | '/admin/scan'
     | '/ticket/$code'
     | '/ticket/demo'
+    | '/ticket'
   id:
     | '__root__'
     | '/'
@@ -193,6 +204,7 @@ export interface FileRouteTypes {
     | '/admin/scan'
     | '/ticket/$code'
     | '/ticket/demo'
+    | '/ticket/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -207,6 +219,7 @@ export interface RootRouteChildren {
   TicketsRoute: typeof TicketsRoute
   TicketCodeRoute: typeof TicketCodeRoute
   TicketDemoRoute: typeof TicketDemoRoute
+  TicketIndexRoute: typeof TicketIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -295,6 +308,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminScanRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/ticket/': {
+      id: '/ticket/'
+      path: '/ticket'
+      fullPath: '/ticket/'
+      preLoaderRoute: typeof TicketIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/ticket/$code': {
       id: '/ticket/$code'
       path: '/ticket/$code'
@@ -338,6 +358,7 @@ const rootRouteChildren: RootRouteChildren = {
   TicketsRoute: TicketsRoute,
   TicketCodeRoute: TicketCodeRoute,
   TicketDemoRoute: TicketDemoRoute,
+  TicketIndexRoute: TicketIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

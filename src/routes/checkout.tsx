@@ -93,7 +93,7 @@ const options: TicketOption[] = [
   {
     id: "group-of-four",
     name: "Group of Four",
-    price: 3600,
+    price: 3200,
     admitsCount: 4,
     description: "Admits 4 guests together (1 QR bundle)",
   },
@@ -299,7 +299,9 @@ function Checkout() {
           }
         } else if (currentOrder.status === "rejected") {
           setPaymentPhase("failed");
-          setPaymentError(currentOrder.rejectionReason || "The organizer rejected this payment claim.");
+          setPaymentError(
+            currentOrder.rejectionReason || "The organizer rejected this payment claim.",
+          );
         } else if (currentOrder.status === "pending_approval") {
           setPaymentPhase("pending_approval");
         }
@@ -1302,8 +1304,8 @@ function Checkout() {
                               Awaiting organizer review
                             </strong>
                             <span>
-                              A submitted M-Pesa message is not confirmation of payment. A ticket
-                              is issued only after the organizer approves the payment.
+                              A submitted M-Pesa message is not confirmation of payment. A ticket is
+                              issued only after the organizer approves the payment.
                             </span>
                           </div>
                         </div>

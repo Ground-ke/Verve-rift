@@ -30,6 +30,8 @@ export const Route = createFileRoute("/pay")({
       { property: "og:title", content: "Payment & Confirmation — Hauntings of the Rift" },
       { property: "og:description", content: "Complete your admission payment securely." },
       { property: "og:type", content: "website" },
+      { name: "referrer", content: "no-referrer" },
+      { httpEquiv: "Cache-Control", content: "no-store, private" },
     ],
   }),
   component: PayRouteComponent,
@@ -122,20 +124,55 @@ function PayRouteComponent() {
     [],
   );
 
-  // Fetch authoritative order details
+  // Fetch authoritative order details via secure session or authorization header
   useEffect(() => {
     async function loadOrder() {
-      if (!search.orderId || !search.token) {
+      let activeOrderId = search.orderId;
+      let activeToken = search.token;
+
+      // Check session storage if not in URL
+      if (!activeOrderId || !activeToken) {
+        try {
+          const stored = sessionStorage.getItem("rift_checkout_session");
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            if (parsed.orderId && parsed.checkoutToken) {
+              activeOrderId = parsed.orderId;
+              activeToken = parsed.checkoutToken;
+            }
+          }
+        } catch {
+          // ignore
+        }
+      } else {
+        // If credentials arrived via URL, preserve into secure session and sanitize URL
+        try {
+          sessionStorage.setItem(
+            "rift_checkout_session",
+            JSON.stringify({ orderId: activeOrderId, checkoutToken: activeToken }),
+          );
+          if (typeof window !== "undefined") {
+            window.history.replaceState({}, document.title, window.location.pathname);
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      if (!activeOrderId || !activeToken) {
         setLoading(false);
-        setErrorMessage("No active order or authorization token provided in link.");
+        setErrorMessage(
+          "No active order or authorization token found. Please start from ticket selection.",
+        );
         return;
       }
 
       try {
         setLoading(true);
-        const res = await fetch(`/api/orders/${search.orderId}?token=${search.token}`, {
+        const res = await fetch(`/api/orders/${activeOrderId}`, {
           headers: {
-            Authorization: `Bearer ${search.token}`,
+            Authorization: `Bearer ${activeToken}`,
+            "X-Checkout-Token": activeToken,
           },
         });
 

@@ -9,6 +9,14 @@ export interface ApiIdentity {
   role: StaffRole;
 }
 
+export function readBearerToken(request: Request): string | null {
+  const token = request.headers
+    .get("authorization")
+    ?.match(/^Bearer\s+(.+)$/i)?.[1]
+    ?.trim();
+  return token || null;
+}
+
 export function resolveSupabaseUserId(
   userId: string | null | undefined,
   error?: unknown,
@@ -22,6 +30,30 @@ export function resolveSupabaseUserId(
     throw error;
   }
   return userId ?? null;
+}
+
+export async function getAuthenticatedApiUser(
+  token: string,
+): Promise<{ userId: string; email: string } | null> {
+  if (!supabaseUrl || !supabaseKey) {
+    throw new Error("Supabase authentication is not configured.");
+  }
+
+  const client = createClient<Database>(supabaseUrl, supabaseKey, {
+    global: { headers: { Authorization: `Bearer ${token}` } },
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+  const { data, error } = await client.auth.getUser(token);
+  if (error) {
+    const status =
+      typeof error === "object" && "status" in error && typeof error.status === "number"
+        ? error.status
+        : undefined;
+    if (status === 400 || status === 401) return null;
+    throw error;
+  }
+  if (!data.user?.id || !data.user.email) return null;
+  return { userId: data.user.id, email: data.user.email.trim().toLowerCase() };
 }
 
 export function requiredApiRoles(pathname: string): readonly StaffRole[] | null {

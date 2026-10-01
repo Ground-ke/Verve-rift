@@ -62,7 +62,7 @@ service cloud.firestore {
 
     function isValidTicket(data) {
       return data.keys().hasAll(['ticketNumber', 'orderId', 'attendeeName', 'status'])
-        && data.keys().hasOnly(['ticketNumber', 'orderId', 'orderNumber', 'attendeeName', 'attendeeEmail', 'buyerPhone', 'tierSlug', 'tierName', 'admitsCount', 'priceKes', 'qrHash', 'status', 'scannedAt', 'scannedBy', 'createdAt'])
+        && data.keys().hasOnly(['ticketNumber', 'orderId', 'orderNumber', 'attendeeName', 'attendeeEmail', 'buyerPhone', 'buyerEmail', 'userId', 'tierSlug', 'tierName', 'admitsCount', 'priceKes', 'qrHash', 'status', 'scannedAt', 'scannedBy', 'createdAt'])
         && data.ticketNumber is string && data.ticketNumber.size() > 0 && data.ticketNumber.size() <= 64
         && data.orderId is string && data.orderId.size() > 0 && data.orderId.size() <= 64
         && data.attendeeName is string && data.attendeeName.size() > 0 && data.attendeeName.size() <= 100
@@ -70,6 +70,8 @@ service cloud.firestore {
         && (!('orderNumber' in data) || (data.orderNumber is string && data.orderNumber.size() <= 64))
         && (!('attendeeEmail' in data) || (data.attendeeEmail is string && data.attendeeEmail.size() <= 100))
         && (!('buyerPhone' in data) || (data.buyerPhone is string && data.buyerPhone.size() <= 32))
+        && (!('buyerEmail' in data) || (data.buyerEmail is string && data.buyerEmail.size() <= 100))
+        && (!('userId' in data) || (data.userId is string && data.userId.size() <= 128))
         && (!('tierSlug' in data) || (data.tierSlug is string && data.tierSlug.size() <= 64))
         && (!('tierName' in data) || (data.tierName is string && data.tierName.size() <= 100))
         && (!('admitsCount' in data) || (data.admitsCount is number && data.admitsCount >= 1))
@@ -82,13 +84,15 @@ service cloud.firestore {
 
     function isValidOrder(data) {
       return data.keys().hasAll(['orderId', 'customerEmail', 'totalKes', 'status'])
-        && data.keys().hasOnly(['orderId', 'orderNumber', 'customerName', 'customerEmail', 'customerPhone', 'ticketTypeId', 'ticketName', 'admitsCount', 'quantity', 'totalKes', 'status', 'mpesaCode', 'mpesaMessage', 'rejectionReason', 'approvedBy', 'approvedAt', 'emailSent', 'paymentReference', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['orderId', 'orderNumber', 'customerName', 'customerEmail', 'buyerEmail', 'userId', 'customerPhone', 'ticketTypeId', 'ticketName', 'admitsCount', 'quantity', 'totalKes', 'status', 'mpesaCode', 'mpesaMessage', 'rejectionReason', 'approvedBy', 'approvedAt', 'emailSent', 'paymentReference', 'createdAt', 'updatedAt'])
         && data.orderId is string && data.orderId.size() > 0 && data.orderId.size() <= 64
         && data.customerEmail is string && data.customerEmail.size() > 0 && data.customerEmail.size() <= 100
         && data.totalKes is number && data.totalKes >= 0
         && data.status in ['pending', 'pending_approval', 'completed', 'approved', 'rejected', 'cancelled', 'refunded']
         && (!('orderNumber' in data) || (data.orderNumber is string && data.orderNumber.size() <= 64))
         && (!('customerName' in data) || (data.customerName is string && data.customerName.size() <= 100))
+        && (!('buyerEmail' in data) || (data.buyerEmail is string && data.buyerEmail.size() <= 100))
+        && (!('userId' in data) || (data.userId is string && data.userId.size() <= 128))
         && (!('customerPhone' in data) || (data.customerPhone is string && data.customerPhone.size() <= 32))
         && (!('ticketTypeId' in data) || (data.ticketTypeId is string && data.ticketTypeId.size() <= 64))
         && (!('ticketName' in data) || (data.ticketName is string && data.ticketName.size() <= 100))
@@ -135,16 +139,16 @@ service cloud.firestore {
 
     // 4. Tickets Collection
     match /tickets/{ticketId} {
-      allow get: if isValidId(ticketId);
-      allow list: if isAdmin();
+      allow get: if isValidId(ticketId) && (isAdmin() || (isSignedIn() && (resource.data.attendeeEmail == request.auth.token.email || ('userId' in resource.data && resource.data.userId == request.auth.uid))));
+      allow list: if isAdmin() || (isSignedIn() && (resource.data.attendeeEmail == request.auth.token.email || ('userId' in resource.data && resource.data.userId == request.auth.uid)));
       allow create, update: if isAdmin() && isValidId(ticketId) && isValidTicket(request.resource.data);
       allow delete: if isAdmin() && isValidId(ticketId);
     }
 
     // 5. Orders Collection
     match /orders/{orderId} {
-      allow get: if isValidId(orderId);
-      allow list: if isAdmin();
+      allow get: if isValidId(orderId) && (isAdmin() || (isSignedIn() && (resource.data.customerEmail == request.auth.token.email || ('userId' in resource.data && resource.data.userId == request.auth.uid))));
+      allow list: if isAdmin() || (isSignedIn() && (resource.data.customerEmail == request.auth.token.email || ('userId' in resource.data && resource.data.userId == request.auth.uid)));
       allow create: if isValidId(orderId) && isValidOrder(request.resource.data) && request.resource.data.status in ['pending', 'pending_approval'];
       allow update: if isValidId(orderId) && (isAdmin() || (isValidOrder(request.resource.data) && request.resource.data.status in ['pending_approval', 'approved', 'rejected']));
       allow delete: if isAdmin() && isValidId(orderId);

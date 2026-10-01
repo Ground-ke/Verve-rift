@@ -147,6 +147,17 @@
           "description": "Contact phone number",
           "maxLength": 32
         },
+        "buyerEmail": {
+          "type": "string",
+          "format": "email",
+          "description": "Purchaser email address",
+          "maxLength": 100
+        },
+        "userId": {
+          "type": "string",
+          "description": "Authenticated attendee user UID",
+          "maxLength": 128
+        },
         "tierSlug": {
           "type": "string",
           "description": "Ticket tier slug (e.g., standard, vip, group)",
@@ -218,6 +229,17 @@
           "format": "email",
           "description": "Purchaser email for ticket delivery",
           "maxLength": 100
+        },
+        "buyerEmail": {
+          "type": "string",
+          "format": "email",
+          "description": "Purchaser contact email",
+          "maxLength": 100
+        },
+        "userId": {
+          "type": "string",
+          "description": "Authenticated attendee user UID",
+          "maxLength": 128
         },
         "customerPhone": {
           "type": "string",

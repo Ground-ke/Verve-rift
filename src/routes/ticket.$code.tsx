@@ -21,6 +21,8 @@ export const Route = createFileRoute("/ticket/$code")({
       { property: "og:title", content: `Event Pass ${params?.code || ""} — Verve & Co.` },
       { property: "og:description", content: "Present this digital pass for entry at the event." },
       { property: "og:type", content: "website" },
+      { name: "referrer", content: "no-referrer" },
+      { httpEquiv: "Cache-Control", content: "no-store, private" },
     ],
   }),
   component: TicketCodeRouteComponent,

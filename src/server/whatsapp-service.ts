@@ -101,7 +101,8 @@ export class WhatsAppNotificationService {
 
       case "event_reminder_24h": {
         // Meta API Parameters: {{1}} = Customer Name, {{2}} = Venue Name/Location, {{3}} = Gate Opening Time, {{4}} = Fast Pass Link
-        const venue = params.venueNameOrLocation || params.venueName || "Top Cliff Lounge, Nakuru";
+        const venue =
+          params.venueNameOrLocation || params.venueName || "The Lawns Restaurant, Nakuru";
         const gateTime = params.gateOpeningTime || "18:00 EAT";
         const fastPassLink =
           params.fastPassLink ||

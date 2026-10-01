@@ -80,6 +80,10 @@ export class TicketsServerService {
     return ManualOrderStore.getTickets();
   }
 
+  static getTicketsForUser(email: string): Promise<DigitalTicketRecord[]> {
+    return ManualOrderStore.getTicketsForBuyerEmail(email);
+  }
+
   /**
    * Updates a ticket record in store
    */
@@ -134,12 +138,12 @@ export class TicketsServerService {
         priceKes: Math.round(order.totalKes / quantity),
         issuedAt: new Date().toISOString(),
         venue: {
-            name: "The Lawns Restaurant",
-            address: "Oyster-Shell Rd, opposite Sarova Woodlands",
+          name: "The Lawns Restaurant",
+          address: "Oyster-Shell Rd, opposite Sarova Woodlands",
           city: "Nakuru, Kenya",
           date: "Saturday, 31 October 2026",
-            time: "4 PM till late",
-            ageRequirement: "18+",
+          time: "4 PM till late",
+          ageRequirement: "18+",
         },
       };
 
@@ -183,12 +187,12 @@ export class TicketsServerService {
         priceKes: Math.round(order.totalKes / quantity),
         issuedAt: new Date().toISOString(),
         venue: {
-            name: "The Lawns Restaurant",
-            address: "Oyster-Shell Rd, opposite Sarova Woodlands",
+          name: "The Lawns Restaurant",
+          address: "Oyster-Shell Rd, opposite Sarova Woodlands",
           city: "Nakuru, Kenya",
           date: "Saturday, 31 October 2026",
-            time: "4 PM till late",
-            ageRequirement: "18+",
+          time: "4 PM till late",
+          ageRequirement: "18+",
         },
       };
 
@@ -551,7 +555,10 @@ export class TicketsServerService {
         success: false,
         status: current?.status === "used" ? "already_used" : "not_found",
         ticket: current,
-        message: current?.status === "used" ? "Ticket has already been checked in." : "Invalid ticket QR code.",
+        message:
+          current?.status === "used"
+            ? "Ticket has already been checked in."
+            : "Invalid ticket QR code.",
       };
     }
     Object.assign(ticket, updatedTicket);
@@ -740,7 +747,10 @@ export class TicketsServerService {
         success: false,
         status: current?.status === "used" ? "already_used" : "not_found",
         httpStatus: current?.status === "used" ? 409 : 404,
-        message: current?.status === "used" ? "Ticket was checked in by another scanner." : "Ticket record is unavailable.",
+        message:
+          current?.status === "used"
+            ? "Ticket was checked in by another scanner."
+            : "Ticket record is unavailable.",
         ticket: current,
         eventStats,
       };

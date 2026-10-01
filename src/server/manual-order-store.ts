@@ -47,9 +47,7 @@ export class ManualOrderStore {
         }
       }
 
-      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
-        `inventory:${ticket.id}`,
-      ]);
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`inventory:${ticket.id}`]);
       if (ticket.totalInventory !== null) {
         const count = await client.query<{ quantity: string }>(
           `SELECT COALESCE(SUM(quantity), 0)::text AS quantity
@@ -82,7 +80,13 @@ export class ManualOrderStore {
       await client.query(
         `INSERT INTO public.manual_ticket_reservations (id, order_id, ticket_type_id, quantity, expires_at, status)
          VALUES ($1, $2, $3, $4, $5, 'active')`,
-        [reservation.id, order.id, reservation.ticketTypeId, reservation.quantity, reservation.expiresAt],
+        [
+          reservation.id,
+          order.id,
+          reservation.ticketTypeId,
+          reservation.quantity,
+          reservation.expiresAt,
+        ],
       );
       return { order, conflict: false, inventoryError: false };
     });
@@ -226,6 +230,16 @@ export class ManualOrderStore {
   static async getTickets(): Promise<DigitalTicketRecord[]> {
     const result = await getSharedPool().query<{ data: DigitalTicketRecord }>(
       "SELECT data FROM public.manual_ticket_records ORDER BY created_at DESC",
+    );
+    return result.rows.map((row) => row.data);
+  }
+
+  static async getTicketsForBuyerEmail(email: string): Promise<DigitalTicketRecord[]> {
+    const result = await getSharedPool().query<{ data: DigitalTicketRecord }>(
+      `SELECT data FROM public.manual_ticket_records
+       WHERE LOWER(COALESCE(data->>'buyerEmail', data->>'attendeeEmail', '')) = $1
+       ORDER BY created_at DESC`,
+      [email.trim().toLowerCase()],
     );
     return result.rows.map((row) => row.data);
   }
