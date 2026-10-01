@@ -119,7 +119,7 @@ export interface TicketTypeConfig {
   admitsCount: number;
   priceKes: number;
   totalInventory: number | null; // NULL by default unless explicitly configured
-  soldCount: number;
+  soldCount: number | null;
   purchaseLimit: number | null; // NULL = NO business limit by default
   isConfigured: boolean;
   active: boolean;
@@ -169,8 +169,8 @@ const defaultTicketTypes: Record<string, TicketTypeConfig> = {
     name: "Early Bird",
     admitsCount: 1,
     priceKes: 1000,
-    totalInventory: 300,
-    soldCount: 0,
+    totalInventory: null,
+    soldCount: null,
     purchaseLimit: null, // Configurable business limit (null = unlimited by default)
     isConfigured: true,
     active: true,
@@ -182,8 +182,8 @@ const defaultTicketTypes: Record<string, TicketTypeConfig> = {
     name: "Couple Pass",
     admitsCount: 2,
     priceKes: 1800,
-    totalInventory: 150,
-    soldCount: 0,
+    totalInventory: null,
+    soldCount: null,
     purchaseLimit: null,
     isConfigured: true,
     active: true,
@@ -195,8 +195,8 @@ const defaultTicketTypes: Record<string, TicketTypeConfig> = {
     name: "Group of Four",
     admitsCount: 4,
     priceKes: 3200,
-    totalInventory: 75,
-    soldCount: 0,
+    totalInventory: null,
+    soldCount: null,
     purchaseLimit: null,
     isConfigured: true,
     active: true,
@@ -337,7 +337,7 @@ export class OrderService {
       priceKes: Math.max(0, Math.round(Number(config.priceKes))),
       admitsCount: Math.max(1, Math.round(Number(config.admitsCount) || 1)),
       totalInventory: config.totalInventory !== undefined ? config.totalInventory : null,
-      soldCount: 0,
+      soldCount: null,
       purchaseLimit: null,
       isConfigured: true,
       active: true,
@@ -365,9 +365,9 @@ export class OrderService {
   /**
    * Get total sold count for a ticket type
    */
-  static getSoldCount(ticketTypeId: string): number {
+  static getSoldCount(ticketTypeId: string): number | null {
     const ticket = this.getTicketType(ticketTypeId);
-    return ticket?.soldCount ?? 0;
+    return ticket?.soldCount ?? null;
   }
 
   /**
@@ -709,7 +709,7 @@ export class OrderService {
     return {
       success: true,
       order,
-      message: "M-Pesa code submitted for admin review within 24 hours.",
+      message: "M-Pesa code submitted and is awaiting organizer review.",
     };
   }
 

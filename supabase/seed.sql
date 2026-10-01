@@ -28,9 +28,9 @@ BEGIN
     'Hauntings of the Rift',
     'Presented by Serve & Co.',
     'A premier Halloween nightlife experience in Nakuru. High-energy electronic atmosphere, curated signature cocktails, and immersive soundscapes.',
-    'Top Cliff Lounge',
+    'Top Cliff Lodge',
     'Nakuru-Nairobi Highway, Free Area, Nakuru, Kenya',
-    'Along Nakuru-Nairobi Highway, Free Area, Nakuru',
+    'Nakuru-Nairobi Highway, Free Area, Nakuru',
     '2026-10-31',
     '16:00:00',
     '18+',
@@ -101,7 +101,7 @@ BEGIN
   SET price_kes = EXCLUDED.price_kes,
       admits_count = EXCLUDED.admits_count;
 
-  -- 3. Group of Four — KES 3,600 (Admits 4)
+  -- 3. Group of Four — KES 3,200 (Admits 4)
   INSERT INTO public.ticket_types (
     event_id,
     slug,
@@ -119,7 +119,7 @@ BEGIN
     'Group of Four',
     'Squad bundle admitting four guests. Fast-track entry together with dedicated group wristbands.',
     4,
-    3600,
+    3200,
     NULL,
     false,
     true,

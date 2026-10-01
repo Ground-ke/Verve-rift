@@ -56,9 +56,9 @@ export const Route = createFileRoute("/")({
 });
 
 const tickets: Ticket[] = [
-  { name: "Early Bird", price: 1000, people: "Single entry", note: "Limited release pricing" },
+  { name: "Early Bird", price: 1000, people: "Single entry", note: "Single entry" },
   { name: "Couple", price: 1800, people: "Entry for two", note: "Arrive together" },
-  { name: "Group of Four", price: 3600, people: "Entry for four", note: "Bring the whole crew" },
+  { name: "Group of Four", price: 3200, people: "Entry for four", note: "Bring the whole crew" },
 ];
 
 const nav = [
@@ -86,15 +86,18 @@ const experiences: Array<[string, string, string, LucideIcon]> = [
 const faqs: Array<[string, string]> = [
   ["Who can attend?", "This is an 18+ event."],
   ["What is the dress code?", "Wickedly Fabulous."],
-  ["Where is the event?", "Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru."],
+  [
+    "Where is the event?",
+    "Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru.",
+  ],
   ["What time does it start?", "Doors open at 4 PM and the event continues till late."],
   [
     "How much are tickets?",
-    "Early Bird is KES 1,000, Couple is KES 1,800, and Group of Four is KES 3,600.",
+    "Early Bird is KES 1,000, Couple is KES 1,800, and Group of Four is KES 3,200.",
   ],
   [
     "How do I buy a ticket?",
-    "Online purchase will be connected when the M-Pesa ticketing backend is ready.",
+    "Checkout is available only when verified M-Pesa payment details and shared order storage are configured.",
   ],
   ["What happens after payment?", "This information will be updated by the organizers."],
   ["Can I get a refund?", "This information will be updated by the organizers."],

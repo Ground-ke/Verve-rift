@@ -434,22 +434,15 @@ export function ManualVerificationTab() {
           </div>
           <p className="text-xs text-muted-foreground font-mono mt-1 max-w-2xl">
             Confirm customer-submitted M-Pesa transaction reference codes against your Safaricom
-            statement. Approving instantly generates cryptographic QR passes and triggers automated
-            email delivery.
+            statement. Tickets are issued only after approval. Email delivery is reported separately
+            and is not guaranteed by the approval action.
           </p>
-          <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-950/40 border border-amber-500/40 text-amber-300 font-mono text-[11px]">
-            <Clock className="w-3.5 h-3.5 text-amber-400" />
-            <span>
-              24-Hour Processing SLA: Attendees have been notified that tickets are verified within
-              24 hours of submission.
-            </span>
-          </div>
         </div>
 
         <div className="flex items-center gap-2.5">
           <div className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-950/40 border border-emerald-500/30 rounded text-emerald-400 font-mono text-xs">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span>Live Sync Active</span>
+            <span>Manual review</span>
           </div>
 
           <Button
@@ -490,14 +483,14 @@ export function ManualVerificationTab() {
 
         <div className="border border-border bg-card p-4 space-y-1">
           <span className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
-            Automated Delivery
+            Ticket delivery
           </span>
           <div className="flex items-center gap-1.5 text-emerald-400 font-mono text-sm pt-1">
             <Mail className="w-4 h-4" />
             <span>Gmail SMTP Active</span>
           </div>
           <p className="text-[10px] text-muted-foreground font-mono">
-            Dispatched from verve.n.co.ke@gmail.com on approval
+            Tickets are stored after approval. Delivery status depends on the email service.
           </p>
         </div>
       </div>

@@ -57,7 +57,7 @@ const DEFAULT_TIERS: TicketTier[] = [
     id: "00000000-0000-0000-0000-000000000013",
     slug: "group-of-four",
     name: "Group of Four",
-    priceKes: 3600,
+    priceKes: 3200,
     admitsCount: 4,
     totalInventory: null,
     soldCount: null,

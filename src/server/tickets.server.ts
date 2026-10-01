@@ -333,7 +333,8 @@ export class TicketsServerService {
       await ManualOrderStore.recordIssuanceKey(txRecord);
 
       // 6. Automatically dispatch confirmation email with ticket pass attached to buyer
-      if (order.buyerEmail) {
+      const firstTicket = tickets[0];
+      if (order.buyerEmail && firstTicket) {
         const siteBase = getSiteBaseUrl();
         sendTicketConfirmationEmail({
           to: order.buyerEmail,
@@ -342,7 +343,7 @@ export class TicketsServerService {
           totalKes: order.totalKes,
           ticketTier: order.ticketName,
           quantity: order.quantity,
-          ticketUrl: `${siteBase}/ticket/${tickets[0]?.ticketNumber || "demo"}`,
+          ticketUrl: `${siteBase}/ticket/${firstTicket.ticketNumber}`,
           tickets: tickets.map((t) => ({
             ticketNumber: t.ticketNumber,
             tierName: t.tierName,
@@ -613,7 +614,7 @@ export class TicketsServerService {
       ticket_code,
       qr_hash,
       staff_name = "Gate Security Staff",
-      gate_location = "Main Top Cliff Entrance",
+      gate_location = "Main Gate Entrance, Top Cliff Lodge",
       clientIp,
     } = params;
     const normalized = ticket_code.trim().toUpperCase();

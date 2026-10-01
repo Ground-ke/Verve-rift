@@ -57,9 +57,9 @@ export const ORGANIZER_APPROVED_TIERS: TicketCatalogTier[] = [
     priceKes: 1000,
     admitsCount: 1,
     peopleLabel: "Single entry",
-    note: "Limited release pricing",
+    note: "Single entry",
     description: "Single entry pass",
-    totalInventory: 300,
+    totalInventory: null,
     active: true,
   },
   {
@@ -71,7 +71,7 @@ export const ORGANIZER_APPROVED_TIERS: TicketCatalogTier[] = [
     peopleLabel: "Entry for two",
     note: "Arrive together",
     description: "Admits 2 guests together (1 shared QR pass)",
-    totalInventory: 150,
+    totalInventory: null,
     active: true,
   },
   {
@@ -83,7 +83,7 @@ export const ORGANIZER_APPROVED_TIERS: TicketCatalogTier[] = [
     peopleLabel: "Entry for four",
     note: "Bring the whole crew",
     description: "Admits 4 guests together (1 shared QR bundle)",
-    totalInventory: 75,
+    totalInventory: null,
     active: true,
   },
 ];

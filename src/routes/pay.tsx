@@ -25,7 +25,7 @@ export const Route = createFileRoute("/pay")({
       {
         name: "description",
         content:
-          "Authoritative M-Pesa checkout and instant cryptographic ticket issuance for Hauntings of the Rift.",
+          "Submit your M-Pesa payment reference for organizer review. Tickets are issued only after approval.",
       },
       { property: "og:title", content: "Payment & Confirmation — Hauntings of the Rift" },
       { property: "og:description", content: "Complete your admission payment securely." },

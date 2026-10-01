@@ -86,44 +86,39 @@ export class WhatsAppNotificationService {
     template: WhatsAppTemplateType,
     params: NonNullable<WhatsAppNotificationPayload["params"]>,
   ): string[] {
-    const customerName = params.customerName || params.attendeeName || "Valued Guest";
+    const customerName = params.customerName || params.attendeeName || "";
 
     switch (template) {
       case "booking_confirmation": {
         // Meta API Parameters: {{1}} = Customer Name, {{2}} = Pass Tier & Quantity, {{3}} = Order ID, {{4}} = Ticket Access URL
         const passDetails =
-          params.passTierAndQuantity || `${params.tierName || "General Admission"} (x1)`;
-        const orderId = params.orderId || params.orderNumber || "HR-2026-CONF";
-        const ticketUrl =
-          params.ticketAccessUrl || params.directTicketUrl || "https://hauntingsoftherift.co.ke";
+          params.passTierAndQuantity || (params.tierName ? `${params.tierName} (x1)` : "");
+        const orderId = params.orderId || params.orderNumber || "";
+        const ticketUrl = params.ticketAccessUrl || params.directTicketUrl || "";
         return [customerName, passDetails, orderId, ticketUrl];
       }
 
       case "event_reminder_24h": {
         // Meta API Parameters: {{1}} = Customer Name, {{2}} = Venue Name/Location, {{3}} = Gate Opening Time, {{4}} = Fast Pass Link
-        const venue = params.venueNameOrLocation || params.venueName || "Top Cliff Lodge, Nakuru";
-        const gateTime = params.gateOpeningTime || "18:00 EAT";
+        const venue = params.venueNameOrLocation || params.venueName || "";
+        const gateTime = params.gateOpeningTime || "";
         const fastPassLink =
-          params.fastPassLink ||
-          params.directTicketUrl ||
-          params.ticketAccessUrl ||
-          "https://hauntingsoftherift.co.ke";
+          params.fastPassLink || params.directTicketUrl || params.ticketAccessUrl || "";
         return [customerName, venue, gateTime, fastPassLink];
       }
 
       case "refund_notice": {
         // Meta API Parameters: {{1}} = Customer Name, {{2}} = Refund Amount (KES), {{3}} = Payment Provider Ref / M-Pesa Receipt Number, {{4}} = Reason/Details
         const amount = String(
-          params.refundAmountKes !== undefined ? params.refundAmountKes : params.totalKes || 0,
+          params.refundAmountKes !== undefined ? params.refundAmountKes : params.totalKes || "",
         );
-        const ref = params.paymentProviderRef || params.orderNumber || "REV-MPESA-CONFIRMED";
-        const reason =
-          params.reasonOrDetails || "Requested by cardholder / administrative adjustment";
+        const ref = params.paymentProviderRef || params.orderNumber || "";
+        const reason = params.reasonOrDetails || "";
         return [customerName, amount, ref, reason];
       }
 
       case "gate_alert": {
-        return [customerName, params.ticketCode || "HR-PASS-VALID"];
+        return [customerName, params.ticketCode || ""];
       }
 
       default:
@@ -226,14 +221,11 @@ export class WhatsAppNotificationService {
     const messageId = `wa_msg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const timestamp = new Date().toISOString();
 
-    const apiKey = process.env.WHATSAPP_API_KEY || process.env.TWILIO_AUTH_TOKEN;
+    const apiKey = process.env["WHATSAPP_API_KEY"];
+    const endpoint = process.env["WHATSAPP_API_URL"];
 
-    if (apiKey) {
+    if (apiKey && endpoint) {
       try {
-        const endpoint =
-          process.env.WHATSAPP_API_URL ||
-          "https://graph.facebook.com/v19.0/YOUR_PHONE_NUMBER_ID/messages";
-
         // Dispatch Meta Cloud API template payload if template specified
         const bodyPayload = {
           messaging_product: "whatsapp",
@@ -275,22 +267,16 @@ export class WhatsAppNotificationService {
             timestamp,
           };
         }
+        console.warn("WhatsApp Gateway rejected the dispatch:", response.status);
       } catch (err) {
-        console.warn("WhatsApp Gateway dispatch error, falling back to simulation:", err);
+        console.warn("WhatsApp Gateway dispatch error:", err);
       }
     }
 
-    // High fidelity dispatch simulation (for testing/preview when API key not configured)
-    console.log(
-      `%c[WhatsApp Meta Dispatch (${payload.template}) to ${cleanPhone}]`,
-      "color: #25D366; font-weight: bold;",
-      `\nParameters: [${metaParams.join(", ")}]\n\n${formattedMessage}`,
-    );
-
     return {
-      success: true,
+      success: false,
       messageId,
-      status: "simulated",
+      status: "failed",
       recipient: cleanPhone,
       template: payload.template,
       metaParameters: metaParams,

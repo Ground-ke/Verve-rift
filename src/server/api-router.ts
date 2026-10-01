@@ -7,12 +7,7 @@ import {
   sendTicketConfirmationEmail,
   sendMpesaReceivedAcknowledgmentEmail,
   sendOrganizerNewMpesaNotification,
-  sendEventReminder24hEmail,
-  sendRefundNoticeEmail,
   sendBroadcastEmail,
-  generateBookingConfirmationEmailHtml,
-  generateEventReminder24hEmailHtml,
-  generateRefundNoticeEmailHtml,
   generateMpesaReceivedEmailHtml,
   getSiteBaseUrl,
 } from "./email.server";
@@ -20,9 +15,7 @@ import { generateTicketPdfBuffer, generateTicketPassImageBuffer } from "./pdf-ti
 import { SlidingWindowRateLimiter } from "./rate-limiter";
 import {
   validateTicketSchema,
-  processRefundSchema,
   sendWhatsAppNotificationSchema,
-  sendEmailNotificationSchema,
 } from "../lib/validation/api-schemas";
 import { sanitizeObject } from "../lib/validation/sanitizer";
 import { isCloudSqlConfigured } from "../db/index.ts";
@@ -70,6 +63,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
   try {
     const requiredRoles = requiredApiRoles(pathname);
     let apiRequestRole: "admin" | "scanner" | null = null;
+    let apiRequestUserId: string | null = null;
 
     if (requiredRoles) {
       const authorization = await authorizeStaffApiRequest(request, requiredRoles);
@@ -85,6 +79,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         );
       }
       apiRequestRole = authorization.identity.role;
+      apiRequestUserId = authorization.identity.userId;
     }
 
     if (pathname === "/api/user/tickets" && method === "GET") {
@@ -109,39 +104,45 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     // 1. Health check
     // --------------------------------------------------------------------------
     if (pathname === "/api/health") {
+      const cloudSqlConfigured = isCloudSqlConfigured();
+      const supabaseConfigured = Boolean(
+        process.env["SUPABASE_URL"] && process.env["SUPABASE_SERVICE_ROLE_KEY"],
+      );
+      const manualMpesaConfigured = Boolean(
+        process.env["VITE_MPESA_PAYBILL"] &&
+        process.env["VITE_MPESA_ACCOUNT"] &&
+        process.env["VITE_MPESA_ACCOUNT_NAME"],
+      );
+      const ready = cloudSqlConfigured && supabaseConfigured && manualMpesaConfigured;
+
       return json({
-        status: "ok",
-        runtime: process.env.VERCEL ? "vercel" : "node",
+        status: ready ? "ok" : "degraded",
+        ready,
+        runtime: process.env["VERCEL"] ? "vercel" : "node",
         time: new Date().toISOString(),
         databases: {
-          cloudSqlConfigured: isCloudSqlConfigured(),
-          supabaseConfigured: Boolean(
-            process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY,
-          ),
+          cloudSqlConfigured,
+          supabaseConfigured,
           firebaseConfigured: Boolean(
-            process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID,
+            process.env["FIREBASE_PROJECT_ID"] || process.env["VITE_FIREBASE_PROJECT_ID"],
           ),
         },
         services: {
-          manualMpesaConfigured: Boolean(
-            process.env.VITE_MPESA_PAYBILL &&
-            process.env.VITE_MPESA_ACCOUNT &&
-            process.env.VITE_MPESA_ACCOUNT_NAME,
-          ),
+          manualMpesaConfigured,
           gmailSmtpConfigured: Boolean(
-            (process.env.SMTP_USER ||
-              process.env.SMTP_USERNAME ||
-              process.env.GMAIL_USER ||
-              process.env.EMAIL_USER) &&
-            (process.env.SMTP_PASS ||
-              process.env.SMTP_PASSWORD ||
-              process.env.GMAIL_APP_PASSWORD ||
-              process.env.GMAIL_PASSWORD ||
-              process.env.EMAIL_PASS ||
-              process.env.EMAIL_PASSWORD),
+            (process.env["SMTP_USER"] ||
+              process.env["SMTP_USERNAME"] ||
+              process.env["GMAIL_USER"] ||
+              process.env["EMAIL_USER"]) &&
+            (process.env["SMTP_PASS"] ||
+              process.env["SMTP_PASSWORD"] ||
+              process.env["GMAIL_APP_PASSWORD"] ||
+              process.env["GMAIL_PASSWORD"] ||
+              process.env["EMAIL_PASS"] ||
+              process.env["EMAIL_PASSWORD"]),
           ),
           whatsappConfigured: Boolean(
-            process.env.WHATSAPP_API_KEY || process.env.TWILIO_AUTH_TOKEN,
+            process.env["WHATSAPP_API_KEY"] && process.env["WHATSAPP_API_URL"],
           ),
         },
       });
@@ -175,6 +176,32 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         body["idempotency_key"] || body["idempotencyKey"]
           ? String(body["idempotency_key"] || body["idempotencyKey"])
           : undefined;
+
+      if (
+        !process.env["VITE_MPESA_PAYBILL"] ||
+        !process.env["VITE_MPESA_ACCOUNT"] ||
+        !process.env["VITE_MPESA_ACCOUNT_NAME"]
+      ) {
+        return errorJson(
+          "Checkout is unavailable because verified M-Pesa payment instructions are not configured.",
+          "PAYMENT_NOT_CONFIGURED",
+          503,
+        );
+      }
+      if (!isCloudSqlConfigured()) {
+        return errorJson(
+          "Checkout is unavailable because shared order storage is not configured.",
+          "STORAGE_UNAVAILABLE",
+          503,
+        );
+      }
+      if (!process.env["SUPABASE_URL"] || !process.env["SUPABASE_SERVICE_ROLE_KEY"]) {
+        return errorJson(
+          "Checkout is unavailable because organizer authentication is not configured.",
+          "STAFF_AUTH_UNAVAILABLE",
+          503,
+        );
+      }
 
       // Extract client IP for rate limiting
       const clientIp =
@@ -266,54 +293,68 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       const order = result.order;
       const targetEmail = (order.buyerEmail || "").trim().toLowerCase();
 
-      // 1. Automate receipt & verification pending email to buyer
-      let buyerEmailDispatched = false;
+      // Email failures must not undo the submitted payment claim.
+      let buyerEmailSent = false;
       if (targetEmail) {
-        sendMpesaReceivedAcknowledgmentEmail({
-          to: targetEmail,
-          customerName: order.buyerName || "Valued Attendee",
-          orderNumber: order.orderNumber,
-          mpesaCode: extractedCode,
-          ticketTier: order.ticketName || "General Admission Pass",
-          quantity: order.quantity || 1,
-          totalKes: order.totalKes || 1000,
-          orderId: order.id,
-          checkoutToken: order.checkoutToken,
-        })
-          .then((res) => {
-            console.info(
-              `[Email Service] M-Pesa acknowledgment dispatched to ${targetEmail} (status: ${res.success ? "sent" : "failed"})`,
-            );
-          })
-          .catch((err) => {
-            console.error("[Email Service] M-Pesa acknowledgment dispatch error:", err);
+        try {
+          const emailResult = await sendMpesaReceivedAcknowledgmentEmail({
+            to: targetEmail,
+            customerName: order.buyerName || "Valued Attendee",
+            orderNumber: order.orderNumber,
+            mpesaCode: extractedCode,
+            ticketTier: order.ticketName,
+            quantity: order.quantity,
+            totalKes: order.totalKes,
+            orderId: order.id,
+            checkoutToken: order.checkoutToken,
           });
-        buyerEmailDispatched = true;
+          buyerEmailSent = emailResult.success && !emailResult.simulated;
+          if (!buyerEmailSent) {
+            console.error(
+              "[Email Service] M-Pesa acknowledgment was not delivered:",
+              emailResult.error ||
+                (emailResult.simulated ? "Delivery was simulated." : "Unknown delivery failure."),
+            );
+          }
+        } catch (error) {
+          console.error("[Email Service] M-Pesa acknowledgment dispatch error:", error);
+        }
       }
 
-      // 2. Automate organizer notification to verve.n.co.ke@gmail.com
-      sendOrganizerNewMpesaNotification({
-        orderNumber: order.orderNumber,
-        orderId: order.id,
-        mpesaCode: extractedCode,
-        customerName: order.buyerName || "Attendee",
-        customerEmail: targetEmail || "Not provided",
-        customerPhone: order.buyerPhone || "Not provided",
-        ticketTier: order.ticketName || "General Admission Pass",
-        quantity: order.quantity || 1,
-        totalKes: order.totalKes || 1000,
-        rawMessage: rawInput.trim(),
-      }).catch((err) => {
-        console.error("[Email Service] Organizer notification dispatch error:", err);
-      });
+      let organizerEmailSent = false;
+      try {
+        const organizerResult = await sendOrganizerNewMpesaNotification({
+          orderNumber: order.orderNumber,
+          orderId: order.id,
+          mpesaCode: extractedCode,
+          customerName: order.buyerName || "Attendee",
+          customerEmail: targetEmail || "Not provided",
+          customerPhone: order.buyerPhone || "Not provided",
+          ticketTier: order.ticketName,
+          quantity: order.quantity,
+          totalKes: order.totalKes,
+          rawMessage: rawInput.trim(),
+        });
+        organizerEmailSent = organizerResult.success && !organizerResult.simulated;
+        if (!organizerEmailSent) {
+          console.error(
+            "[Email Service] Organizer notification was not delivered:",
+            organizerResult.error ||
+              (organizerResult.simulated ? "Delivery was simulated." : "Unknown delivery failure."),
+          );
+        }
+      } catch (error) {
+        console.error("[Email Service] Organizer notification dispatch error:", error);
+      }
 
       return json({
         success: true,
         orderId,
         mpesaCode: extractedCode,
         status: "pending_approval",
-        message: "M-Pesa code submitted. Ticket approval dispatched to admin.",
-        buyerEmailSent: buyerEmailDispatched,
+        message: "M-Pesa code submitted and is awaiting organizer review.",
+        buyerEmailSent,
+        organizerEmailSent,
         order: result.order,
       });
     }
@@ -872,17 +913,22 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       }
 
       const orderId = String(body["order_id"] || body["orderId"] || "");
-      const adminEmail = String(body["admin_email"] || body["adminEmail"] || "admin@verve.co.ke");
+      const adminEmail = apiRequestUserId || "authenticated-admin";
 
       if (!orderId) {
         return errorJson("order_id is required.", "INVALID_INPUT", 400);
       }
 
       // 1. Approve order state in authoritative service
-      const approveResult = await OrderService.approveOrder({
-        orderId,
-        adminEmail,
-      });
+      const existingOrder = await OrderService._getOrderByIdInternal(orderId);
+      const approveResult =
+        existingOrder?.status === "approved" && existingOrder.mpesaCode
+          ? {
+              success: true,
+              order: existingOrder,
+              message: "Order is already approved; retrying ticket issuance.",
+            }
+          : await OrderService.approveOrder({ orderId, adminEmail });
 
       if (!approveResult.success || !approveResult.order) {
         return json(approveResult, approveResult.code === "NOT_FOUND" ? 404 : 400);
@@ -897,18 +943,30 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         tickets = await TicketsServerService.issueTicketsForApprovedOrder(orderId);
       } catch (err) {
         console.error("Failed to issue tickets for order:", err);
+        return errorJson(
+          "Payment approval was saved, but ticket issuance failed. Retry ticket issuance before confirming this order.",
+          "TICKET_ISSUANCE_FAILED",
+          503,
+        );
+      }
+      if (tickets.length !== order.quantity) {
+        return errorJson(
+          "Payment approval was saved, but the expected tickets are not available yet.",
+          "TICKET_ISSUANCE_INCOMPLETE",
+          503,
+        );
+      }
+      const firstTicket = tickets[0];
+      if (!firstTicket) {
+        return errorJson(
+          "Payment approval was saved, but no ticket record is available yet.",
+          "TICKET_ISSUANCE_INCOMPLETE",
+          503,
+        );
       }
 
       // 3. Send ticket confirmation email to buyer if email provided
       let emailResult = { success: false, simulated: false, reason: "No email provided on order" };
-      const overrideEmail =
-        body["buyer_email"] ||
-        body["buyerEmail"] ||
-        body["customerEmail"] ||
-        body["customer_email"];
-      if (overrideEmail && typeof overrideEmail === "string" && !order.buyerEmail) {
-        order.buyerEmail = overrideEmail.trim().toLowerCase();
-      }
       const recipientEmail = order.buyerEmail;
 
       if (recipientEmail) {
@@ -921,10 +979,11 @@ export async function handleApiRequest(request: Request): Promise<Response> {
             totalKes: order.totalKes,
             ticketTier: order.ticketName,
             quantity: order.quantity,
-            ticketUrl: `${siteBase}/ticket/${tickets[0]?.ticketNumber || "demo"}`,
+            ticketUrl: `${siteBase}/ticket/${firstTicket.ticketNumber}`,
             tickets: tickets.map((t) => ({
               ticketNumber: t.ticketNumber,
               tierName: t.tierName,
+              attendeeName: t.attendeeName,
               admitsCount: t.admitsCount,
               qrHash: t.qrHash,
               ticketUrl: `${siteBase}/ticket/${t.ticketNumber}`,
@@ -938,12 +997,15 @@ export async function handleApiRequest(request: Request): Promise<Response> {
               )}`,
             })),
           });
+          const simulated = "simulated" in emailResponse ? Boolean(emailResponse.simulated) : false;
           emailResult = {
-            success: emailResponse.success,
-            simulated: "simulated" in emailResponse ? Boolean(emailResponse.simulated) : false,
-            reason: emailResponse.success
-              ? "Email dispatched successfully"
-              : "Email service returned failure",
+            success: emailResponse.success && !simulated,
+            simulated,
+            reason: simulated
+              ? "Email was not sent; the email service is in preview mode"
+              : emailResponse.success
+                ? "Email dispatched successfully"
+                : "Email service returned failure",
           };
         } catch (emailErr) {
           console.error("Error sending ticket email:", emailErr);
@@ -1003,33 +1065,6 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     }
 
     // --------------------------------------------------------------------------
-    // 16e. POST /api/admin/orders/seed-demo (Seed a sample pending approval order)
-    // --------------------------------------------------------------------------
-    if (pathname === "/api/admin/orders/seed-demo" && method === "POST") {
-      const demoOrder = await OrderService.createOrder({
-        ticketTypeId: "rift-coven",
-        quantity: 1,
-        buyerName: "Faith Chebet",
-        buyerPhone: "0712345678",
-        buyerEmail: "faith.chebet@example.com",
-      });
-
-      if (demoOrder.success) {
-        await OrderService.submitMpesaCode({
-          orderId: demoOrder.orderId,
-          mpesaCode: "TLK99XW82A",
-          mpesaMessage:
-            "TLK99XW82A Confirmed. Ksh 10,000 sent to HALLOWEEN RIFT PARTY on 21/09/2026 at 2:30 PM. New M-PESA balance is Ksh 45,210.",
-        });
-        return json({
-          success: true,
-          message: "Demo pending order created for verification testing.",
-          orderId: demoOrder.orderId,
-        });
-      }
-      return json({ success: false, message: "Failed to create demo order." }, 500);
-    }
-
     // --------------------------------------------------------------------------
     // 17. GET /api/admin/promotions (Promotion Codes List)
     // --------------------------------------------------------------------------
@@ -1251,50 +1286,18 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     // 24. POST /api/admin/refunds/process (Execute Order / Ticket Refund)
     // --------------------------------------------------------------------------
     if (pathname === "/api/admin/refunds/process" && method === "POST") {
-      let rawBody: Record<string, unknown>;
-      try {
-        rawBody = (await request.json()) as Record<string, unknown>;
-      } catch {
-        return errorJson("Invalid JSON request body.", "INVALID_JSON", 400);
-      }
-
-      const body = sanitizeObject(rawBody);
-      const parseResult = processRefundSchema.safeParse({
-        orderId: body["orderId"] || body["order_id"],
-        ticketNumber: body["ticketNumber"] || body["ticket_number"],
-        amountKes: Number(body["amountKes"] || body["amount_kes"] || body["amount"] || 0),
-        reason: body["reason"],
-        refundType: body["refundType"] || body["refund_type"] || "full",
-        actorEmail: body["actorEmail"] || body["actor_email"] || "admin@verve.co.ke",
-        actorId: body["actorId"] || body["actor_id"],
-      });
-
-      if (!parseResult.success) {
-        return errorJson(
-          parseResult.error.errors[0]?.message || "Invalid refund payload",
-          "VALIDATION_ERROR",
-          400,
-        );
-      }
-
-      const clientIp =
-        request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-        request.headers.get("x-real-ip") ||
-        "127.0.0.1";
-
-      const refundResult = await RefundService.processRefund({
-        ...parseResult.data,
-        clientIp,
-      });
-
-      return json(refundResult, refundResult.success ? 200 : 400);
+      return errorJson(
+        "Refund processing is unavailable until an M-Pesa reversal can be verified and durably recorded.",
+        "REFUNDS_UNAVAILABLE",
+        503,
+      );
     }
 
     // --------------------------------------------------------------------------
     // 25. GET /api/admin/reconciliation (Financial Reconciliation Ledger & Metrics)
     // --------------------------------------------------------------------------
     if (pathname === "/api/admin/reconciliation" && method === "GET") {
-      const reconciliationData = RefundService.getReconciliationData();
+      const reconciliationData = await RefundService.getReconciliationData();
       return json({ success: true, ...reconciliationData });
     }
 
@@ -1317,8 +1320,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           body["customerName"] ||
           body["customer_name"] ||
           body["attendeeName"] ||
-          body["attendee_name"] ||
-          "Valued Guest",
+          body["attendee_name"],
         passTierAndQuantity:
           body["passTierAndQuantity"] ||
           body["pass_tier_quantity"] ||
@@ -1361,212 +1363,76 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       if (apiRequestRole === "scanner" && data.templateType !== "gate_alert") {
         return errorJson("Scanners may only dispatch gate alerts.", "FORBIDDEN", 403);
       }
+      if (data.templateType !== "gate_alert") {
+        return errorJson(
+          "Customer notifications must be generated from a verified order or ticket record.",
+          "VERIFIED_RECORD_REQUIRED",
+          409,
+        );
+      }
+      if (!data.ticketCode) {
+        return errorJson("Gate alerts require a ticket code.", "VERIFIED_RECORD_REQUIRED", 400);
+      }
+      const ticketResult = await TicketsServerService.getTicketByCode(data.ticketCode);
+      const ticket = ticketResult.ticket;
+      if (!ticket || !ticketResult.success) {
+        return errorJson("No ticket found for this gate alert.", "TICKET_NOT_FOUND", 404);
+      }
+      const normalizePhone = (phone: string) => phone.replace(/\D/g, "").replace(/^0/, "254");
+      if (
+        ticket.status !== "used" ||
+        !ticket.buyerPhone ||
+        normalizePhone(ticket.buyerPhone) !== normalizePhone(data.phone)
+      ) {
+        return errorJson(
+          "A gate alert requires a checked-in ticket and its verified buyer phone number.",
+          "VERIFIED_RECORD_REQUIRED",
+          409,
+        );
+      }
       const dispatchResult = await WhatsAppNotificationService.sendNotification({
-        recipientPhone: data.phone,
+        recipientPhone: ticket.buyerPhone,
         template: data.templateType,
         params: {
-          customerName: data.customerName || data.attendeeName || "Valued Guest",
-          passTierAndQuantity:
-            data.passTierAndQuantity ||
-            (data.tierName ? `${data.tierName} (x1)` : "General Admission Pass (x1)"),
-          orderId: data.orderId || data.orderNumber || "HR-2026-CONFIRMED",
-          ticketAccessUrl:
-            data.ticketAccessUrl ||
-            data.directTicketUrl ||
-            "https://hauntingsoftherift.co.ke/ticket/demo",
-          venueNameOrLocation:
-            data.venueNameOrLocation ||
-            "Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru",
-          gateOpeningTime: data.gateOpeningTime || "4:00 PM till late",
-          fastPassLink:
-            data.fastPassLink ||
-            data.ticketAccessUrl ||
-            "https://hauntingsoftherift.co.ke/ticket/demo",
-          refundAmountKes: data.refundAmountKes || "1,800",
-          paymentProviderRef: data.paymentProviderRef || "REV-MPESA-DEFAULT",
-          reasonOrDetails: data.reasonOrDetails || "Customer cancellation request",
+          customerName: ticket.attendeeName,
+          ticketCode: ticket.ticketNumber,
         },
       });
 
-      return json(dispatchResult, 200);
+      return json(dispatchResult, dispatchResult.success ? 200 : 503);
     }
 
     // --------------------------------------------------------------------------
     // 27. POST /api/notifications/email (Dispatch Transactional HTML Email)
     // --------------------------------------------------------------------------
     if (pathname === "/api/notifications/email" && method === "POST") {
-      let rawBody: Record<string, unknown>;
-      try {
-        rawBody = (await request.json()) as Record<string, unknown>;
-      } catch {
-        return errorJson("Invalid JSON request body.", "INVALID_JSON", 400);
-      }
-
-      const body = sanitizeObject(rawBody);
-      const parseResult = sendEmailNotificationSchema.safeParse(body);
-      if (!parseResult.success) {
-        return errorJson(
-          parseResult.error.errors[0]?.message || "Invalid Email notification payload",
-          "VALIDATION_ERROR",
-          400,
-        );
-      }
-
-      const {
-        to,
-        templateType,
-        customer_name = "Valued Guest",
-        ticket_tier = "General Admission Pass",
-        quantity = 1,
-        total_amount = "1,800",
-        order_id = "HR-2026-CONFIRMED",
-        event_date = "Saturday, 31 October 2026",
-        ticket_url = "https://hauntingsoftherift.co.ke/ticket/demo",
-        venue_name = "Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru",
-        gate_opening_time = "4:00 PM till late",
-        refund_amount = "1,800",
-        payment_ref = "REV-MPESA-DEFAULT",
-        refund_reason = "Customer cancellation request",
-      } = parseResult.data;
-
-      let emailResult;
-      if (templateType === "booking_confirmation") {
-        emailResult = await sendTicketConfirmationEmail({
-          to,
-          buyerName: customer_name,
-          orderNumber: order_id,
-          totalKes:
-            typeof total_amount === "number"
-              ? total_amount
-              : Number(String(total_amount).replace(/,/g, "")) || 1800,
-          ticketTier: ticket_tier,
-          quantity: Number(quantity) || 1,
-          ticketUrl: ticket_url,
-        });
-      } else if (templateType === "event_reminder_24h") {
-        emailResult = await sendEventReminder24hEmail({
-          to,
-          customerName: customer_name,
-          venueName: venue_name,
-          gateOpeningTime: gate_opening_time,
-          ticketTier: ticket_tier,
-          ticketUrl: ticket_url,
-        });
-      } else if (templateType === "refund_notice") {
-        emailResult = await sendRefundNoticeEmail({
-          to,
-          customerName: customer_name,
-          refundAmount: refund_amount,
-          paymentRef: payment_ref,
-          refundReason: refund_reason,
-          orderId: order_id,
-        });
-      }
-
-      return json({ success: true, result: emailResult }, 200);
+      return errorJson(
+        "Customer emails must be generated from a verified order or ticket record.",
+        "VERIFIED_RECORD_REQUIRED",
+        409,
+      );
     }
 
     // --------------------------------------------------------------------------
     // 28. POST /api/notifications/reminder-24h (Batch 24h Reminder Dispatch)
     // --------------------------------------------------------------------------
     if (pathname === "/api/notifications/reminder-24h" && method === "POST") {
-      const tickets = await TicketsServerService.getAllTickets();
-      const validTickets = tickets.filter((t) => t.status === "valid");
-
-      const dispatched = [];
-      for (const t of validTickets) {
-        if (t.buyerPhone) {
-          const res = await WhatsAppNotificationService.sendNotification({
-            recipientPhone: t.buyerPhone,
-            template: "event_reminder_24h",
-            params: {
-              customerName: t.attendeeName,
-              venueNameOrLocation: t.venue.name,
-              gateOpeningTime: t.venue.time,
-              fastPassLink: `https://hauntingsoftherift.co.ke/ticket/${t.ticketNumber}`,
-            },
-          });
-          dispatched.push({
-            ticketNumber: t.ticketNumber,
-            phone: t.buyerPhone,
-            whatsapp: res.success,
-          });
-        }
-        if (t.buyerEmail) {
-          await sendEventReminder24hEmail({
-            to: t.buyerEmail,
-            customerName: t.attendeeName,
-            venueName: t.venue.name,
-            gateOpeningTime: t.venue.time,
-            ticketTier: t.tierName,
-            ticketUrl: `https://hauntingsoftherift.co.ke/ticket/${t.ticketNumber}`,
-          });
-        }
-      }
-
-      return json({
-        success: true,
-        message: `Dispatched 24h event reminders to ${validTickets.length} active ticket holder(s).`,
-        count: validTickets.length,
-        dispatched,
-      });
+      return errorJson(
+        "Bulk reminders are disabled until event timing and delivery status can be verified.",
+        "REMINDERS_UNAVAILABLE",
+        503,
+      );
     }
 
     // --------------------------------------------------------------------------
     // 29. GET /api/notifications/preview (HTML & Plaintext Preview Engine)
     // --------------------------------------------------------------------------
     if (pathname === "/api/notifications/preview" && method === "GET") {
-      const template = (url.searchParams.get("template") || "booking_confirmation") as
-        "booking_confirmation" | "event_reminder_24h" | "refund_notice";
-      const format = url.searchParams.get("format") || "both"; // 'html' | 'plaintext' | 'both'
-
-      let html = "";
-      let plaintext = "";
-
-      if (template === "booking_confirmation") {
-        html = generateBookingConfirmationEmailHtml({
-          customer_name: "Mwangi Karanja",
-          ticket_tier: "VIP Rift Access Pass",
-          quantity: 2,
-          total_amount: "7,000",
-          order_id: "HR-2026-9042",
-          event_date: "Saturday, 31 October 2026",
-          ticket_url: "https://hauntingsoftherift.co.ke/ticket/HR-1049-9941",
-        });
-        plaintext = `🎃 *HAUNTINGS OF THE RIFT — TICKET CONFIRMED* 🎃\n\nHey Mwangi Karanja! Your entry pass is secured. Get ready for an unforgettable night at the Rift.\n\n🎟️ *Pass Details:* VIP Rift Access Pass (x2)\n🧾 *Order ID:* HR-2026-9042\n\n👇 *Access Your Digital Pass & QR Code:*\nhttps://hauntingsoftherift.co.ke/ticket/HR-1049-9941\n\n⚠️ *Important Gate Rules:*\n• Bring a valid ID matching your registration details.\n• Keep your QR code saved offline or loaded before arrival at the gate.\n• Passes are single-entry only.\n\nNeed help? Reply directly to this message.`;
-      } else if (template === "event_reminder_24h") {
-        html = generateEventReminder24hEmailHtml({
-          customer_name: "Mwangi Karanja",
-          venue_name: "Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru",
-          gate_opening_time: "4:00 PM till late",
-          ticket_tier: "VIP Rift Access Pass",
-          ticket_url: "https://hauntingsoftherift.co.ke/ticket/HR-1049-9941",
-        });
-        plaintext = `⏰ *TOMORROW AT THE RIFT* ⏰\n\nHey Mwangi Karanja, the event is tomorrow.\n\n📍 *Venue:* Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru\n🚪 *Event time:* 4:00 PM till late\n\n👇 *Have your QR code ready at the gate:*\nhttps://hauntingsoftherift.co.ke/ticket/HR-1049-9941\n\nEntry is strictly 18+ with valid ID.`;
-      } else if (template === "refund_notice") {
-        html = generateRefundNoticeEmailHtml({
-          customer_name: "Mwangi Karanja",
-          refund_amount: "3,500",
-          payment_ref: "REV-MPESA-98842",
-          refund_reason: "Customer cancellation request prior to cut-off",
-          order_id: "HR-2026-9042",
-        });
-        plaintext = `🧾 *REFUND PROCESSED — HAUNTINGS OF THE RIFT* 🧾\n\nHi Mwangi Karanja,\n\nYour refund of *KES 3,500* has been successfully processed.\n\n*Reference:* REV-MPESA-98842\n*Details:* Customer cancellation request prior to cut-off\n\nNote: Associated passes for order HR-2026-9042 are now invalidated. Reach out to support@verve.co.ke for assistance.`;
-      }
-
-      if (format === "html") {
-        return new Response(html, {
-          status: 200,
-          headers: { "Content-Type": "text/html; charset=utf-8" },
-        });
-      }
-
-      return json({
-        success: true,
-        template,
-        plaintext,
-        html,
-      });
+      return errorJson(
+        "Server-generated notification previews are disabled; use the clearly labeled local preview.",
+        "PREVIEW_UNAVAILABLE",
+        503,
+      );
     }
 
     // --------------------------------------------------------------------------

@@ -4,6 +4,9 @@ import {
   requiredApiRoles,
   resolveSupabaseUserId,
 } from "../src/server/api-auth";
+import { handleApiRequest } from "../src/server/api-router";
+import { RefundService } from "../src/server/refund-service";
+import { WhatsAppNotificationService } from "../src/server/whatsapp-service";
 
 function assert(condition: boolean, name: string) {
   if (!condition) throw new Error(`FAIL: ${name}`);
@@ -11,6 +14,75 @@ function assert(condition: boolean, name: string) {
 }
 
 async function run() {
+  const readinessVariables = [
+    "DATABASE_URL",
+    "POSTGRES_URL",
+    "SQL_HOST",
+    "SQL_USER",
+    "SQL_DB_NAME",
+    "SQL_PASSWORD",
+    "SQL_PORT",
+    "SUPABASE_URL",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "VITE_MPESA_PAYBILL",
+    "VITE_MPESA_ACCOUNT",
+    "VITE_MPESA_ACCOUNT_NAME",
+  ];
+  const savedReadinessEnvironment = new Map(
+    readinessVariables.map((key) => [key, process.env[key]] as const),
+  );
+  try {
+    readinessVariables.forEach((key) => delete process.env[key]);
+
+    const healthResponse = await handleApiRequest(new Request("https://example.test/api/health"));
+    const health = (await healthResponse.json()) as { status: string; ready: boolean };
+    assert(
+      health.status === "degraded" && !health.ready,
+      "Report production readiness as degraded while critical services are unconfigured",
+    );
+
+    const createOrderRequest = () =>
+      new Request("https://example.test/api/orders/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ticket_type_id: "early-bird",
+          quantity: 1,
+          buyer_name: "Test Buyer",
+          buyer_phone: "254712345678",
+        }),
+      });
+    const createOrderResponse = await handleApiRequest(createOrderRequest());
+    const createOrder = (await createOrderResponse.json()) as { code?: string };
+    assert(
+      createOrderResponse.status === 503 && createOrder.code === "PAYMENT_NOT_CONFIGURED",
+      "Reject order creation server-side until verified M-Pesa instructions are configured",
+    );
+
+    process.env["VITE_MPESA_PAYBILL"] = "test-paybill";
+    process.env["VITE_MPESA_ACCOUNT"] = "test-account";
+    process.env["VITE_MPESA_ACCOUNT_NAME"] = "Test merchant";
+    const storageResponse = await handleApiRequest(createOrderRequest());
+    const storageError = (await storageResponse.json()) as { code?: string };
+    assert(
+      storageResponse.status === 503 && storageError.code === "STORAGE_UNAVAILABLE",
+      "Reject checkout when payment instructions exist but shared storage is unavailable",
+    );
+
+    process.env["DATABASE_URL"] = "postgres://unreachable.example/test";
+    const staffAuthResponse = await handleApiRequest(createOrderRequest());
+    const staffAuthError = (await staffAuthResponse.json()) as { code?: string };
+    assert(
+      staffAuthResponse.status === 503 && staffAuthError.code === "STAFF_AUTH_UNAVAILABLE",
+      "Reject checkout when organizers cannot authenticate and review payments",
+    );
+  } finally {
+    for (const [key, value] of savedReadinessEnvironment) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+
   assert(
     resolveSupabaseUserId(null, { status: 400 }) === null,
     "Map malformed-token auth rejection to 401",
@@ -35,6 +107,33 @@ async function run() {
     requiredApiRoles("/api/notifications/reminder-24h")?.includes("admin") === true,
     "Protect administrative notification endpoints",
   );
+  const reconciliation = await RefundService.getReconciliationData();
+  assert(
+    !reconciliation.available && reconciliation.ledger.length === 0,
+    "Do not synthesize reconciliation records without verified settlement data",
+  );
+  const savedWhatsAppEnvironment = new Map(
+    ["WHATSAPP_API_KEY", "TWILIO_AUTH_TOKEN", "WHATSAPP_API_URL"].map(
+      (key) => [key, process.env[key]] as const,
+    ),
+  );
+  try {
+    for (const key of savedWhatsAppEnvironment.keys()) delete process.env[key];
+    const notification = await WhatsAppNotificationService.sendNotification({
+      recipientPhone: "254712345678",
+      template: "gate_alert",
+      params: { customerName: "Test", ticketCode: "TEST-123" },
+    });
+    assert(
+      !notification.success && notification.status === "failed",
+      "Do not report an undelivered WhatsApp message as successful",
+    );
+  } finally {
+    for (const [key, value] of savedWhatsAppEnvironment) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
   assert(
     requiredApiRoles("/api/tickets/validate")?.includes("scanner") === true,
     "Protect scanner validation endpoints",
