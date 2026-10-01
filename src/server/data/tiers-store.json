@@ -6,8 +6,8 @@
     "name": "Early Bird",
     "admitsCount": 1,
     "priceKes": 1000,
-    "totalInventory": 300,
-    "soldCount": 0,
+    "totalInventory": null,
+    "soldCount": null,
     "purchaseLimit": null,
     "isConfigured": true,
     "active": true
@@ -19,8 +19,8 @@
     "name": "Couple Pass",
     "admitsCount": 2,
     "priceKes": 1800,
-    "totalInventory": 150,
-    "soldCount": 0,
+    "totalInventory": null,
+    "soldCount": null,
     "purchaseLimit": null,
     "isConfigured": true,
     "active": true
@@ -32,8 +32,8 @@
     "name": "Group of Four",
     "admitsCount": 4,
     "priceKes": 3200,
-    "totalInventory": 75,
-    "soldCount": 0,
+    "totalInventory": null,
+    "soldCount": null,
     "purchaseLimit": null,
     "isConfigured": true,
     "active": true

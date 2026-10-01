@@ -195,67 +195,26 @@ export class RefundService {
   }
 
   /**
-   * Compute Financial Reconciliation Metrics & Transaction Ledger
+   * Reconciliation requires durable M-Pesa settlement and reversal records.
    */
   static async getReconciliationData(): Promise<{
+    available: boolean;
     totals: FinancialSummaryTotals;
     ledger: FinancialReconciliationRecord[];
     refunds: RefundRecord[];
   }> {
-    const tickets = await TicketsServerService.getAllTickets();
-    const refunds = Array.from(refundsStore.values());
-
-    const totalTicketsSold = tickets.length;
-    const grossRevenueKes = tickets.reduce((sum, t) => sum + (t.priceKes || 0), 0);
-    const totalRefundsKes = refunds.reduce((sum, r) => sum + (r.amountKes || 0), 0);
-
-    // M-Pesa gateway transaction fee (standard 2.5%)
-    const platformFeesKes = Math.round(grossRevenueKes * 0.025);
-    const netRevenueKes = grossRevenueKes - totalRefundsKes - platformFeesKes;
-
-    const totals: FinancialSummaryTotals = {
-      grossRevenueKes,
-      totalRefundsKes,
-      platformFeesKes,
-      netRevenueKes,
-      totalTicketsSold,
-      totalRefundsCount: refunds.length,
-    };
-
-    // Build structured reconciliation line items for each transaction
-    const ledger: FinancialReconciliationRecord[] = tickets.map((t) => {
-      const refund = refunds.find(
-        (r) => r.ticketNumber === t.ticketNumber || r.orderId === t.orderId,
-      );
-      const isRefunded = t.status === "refunded" || Boolean(refund);
-      const fee = Math.round(t.priceKes * 0.025);
-      const net = isRefunded ? 0 : t.priceKes - fee;
-
-      let status: "Matched" | "Discrepancy" | "Refunded" | "Pending Settlement" = "Matched";
-      if (isRefunded) {
-        status = "Refunded";
-      } else if (t.status === "cancelled") {
-        status = "Discrepancy";
-      }
-
-      return {
-        transactionId: `tx_${t.ticketNumber}`,
-        orderNumber: t.orderNumber,
-        gatewayRef: `MPESA-${t.ticketNumber.replace(/-/g, "")}`,
-        attendeeName: t.attendeeName,
-        tierName: t.tierName,
-        amountKes: t.priceKes,
-        gatewayFeeKes: fee,
-        netRevenueKes: net,
-        status,
-        createdAt: t.issuedAt,
-      };
-    });
-
     return {
-      totals,
-      ledger,
-      refunds,
+      available: false,
+      totals: {
+        grossRevenueKes: 0,
+        totalRefundsKes: 0,
+        platformFeesKes: 0,
+        netRevenueKes: 0,
+        totalTicketsSold: 0,
+        totalRefundsCount: 0,
+      },
+      ledger: [],
+      refunds: [],
     };
   }
 }

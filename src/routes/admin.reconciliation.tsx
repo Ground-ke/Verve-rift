@@ -27,7 +27,6 @@ import {
   type FinancialSummaryTotals,
 } from "../lib/export-utils";
 import type { RefundRecord } from "../server/refund-service";
-import { subscribeToTickets, type FirestoreTicket } from "../lib/firebase/firestore-service";
 
 export const Route = createFileRoute("/admin/reconciliation")({
   component: AdminReconciliationPage,
@@ -35,6 +34,7 @@ export const Route = createFileRoute("/admin/reconciliation")({
 
 export function AdminReconciliationPage() {
   const [loading, setLoading] = useState(true);
+  const [reconciliationAvailable, setReconciliationAvailable] = useState(false);
   const [totals, setTotals] = useState<FinancialSummaryTotals>({
     grossRevenueKes: 0,
     totalRefundsKes: 0,
@@ -74,9 +74,21 @@ export function AdminReconciliationPage() {
       });
       if (res.ok) {
         const data = await res.json();
-        if (data.totals) setTotals(data.totals);
-        if (data.ledger) setLedger(data.ledger);
-        if (data.refunds) setRefunds(data.refunds);
+        setReconciliationAvailable(data.available === true);
+        setTotals(
+          data.available === true
+            ? data.totals
+            : {
+                grossRevenueKes: 0,
+                totalRefundsKes: 0,
+                platformFeesKes: 0,
+                netRevenueKes: 0,
+                totalTicketsSold: 0,
+                totalRefundsCount: 0,
+              },
+        );
+        setLedger(data.available === true ? data.ledger : []);
+        setRefunds(data.available === true ? data.refunds : []);
       }
     } catch (err) {
       console.warn("Error loading reconciliation ledger:", err);
@@ -87,51 +99,6 @@ export function AdminReconciliationPage() {
 
   useEffect(() => {
     fetchReconciliationData();
-
-    // Live sync reconciliation data from Firestore tickets
-    const unsubscribe = subscribeToTickets((liveTickets: FirestoreTicket[]) => {
-      if (liveTickets && liveTickets.length > 0) {
-        const soldCount = liveTickets.length;
-        const grossRevenue = liveTickets
-          .filter((t) => t.status !== "cancelled")
-          .reduce((sum, t) => sum + (t.priceKes || 0), 0);
-        const fees = Math.round(grossRevenue * 0.025);
-
-        setTotals((prev) => {
-          const net = grossRevenue - (prev?.totalRefundsKes || 0) - fees;
-          return {
-            grossRevenueKes: grossRevenue,
-            totalRefundsKes: prev?.totalRefundsKes || 0,
-            platformFeesKes: fees,
-            netRevenueKes: Math.max(0, net),
-            totalTicketsSold: soldCount,
-            totalRefundsCount: prev?.totalRefundsCount || 0,
-          };
-        });
-
-        // Convert live tickets to ledger records if backend ledger is empty
-        setLedger((prev) => {
-          if (prev.length > 0) return prev;
-          return liveTickets.map((t, idx) => ({
-            transactionId: `TXN-DAR-${t.ticketNumber}`,
-            orderNumber: t.orderNumber || t.orderId || `ORD-${t.ticketNumber}`,
-            gatewayRef: `MPESA-${t.ticketNumber.replace("HR-", "")}`,
-            attendeeName: t.attendeeName,
-            tierName: t.tierName || "General Admission",
-            amountKes: t.priceKes || 0,
-            gatewayFeeKes: Math.round((t.priceKes || 0) * 0.025),
-            netRevenueKes: Math.round((t.priceKes || 0) * 0.975),
-            status: t.status === "cancelled" ? ("Refunded" as const) : ("Matched" as const),
-            createdAt: t.createdAt || new Date().toISOString(),
-          }));
-        });
-      }
-      setLoading(false);
-    });
-
-    return () => {
-      if (unsubscribe) unsubscribe();
-    };
   }, []);
 
   const handleProcessRefund = async (e: React.FormEvent) => {
@@ -214,10 +181,10 @@ export function AdminReconciliationPage() {
               </div>
               <div>
                 <h1 className="text-2xl font-bold tracking-tight text-white font-serif">
-                  Financial Reconciliation & Settlement
+                  Financial Reconciliation
                 </h1>
                 <p className="text-sm text-slate-400">
-                  M-Pesa B2C payout verification, platform fee audits, and refund ledger
+                  M-Pesa payout fees and reversals are not yet verified or durably recorded.
                 </p>
               </div>
             </div>
@@ -225,17 +192,15 @@ export function AdminReconciliationPage() {
 
           <div className="flex flex-wrap items-center gap-2.5">
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-950/40 border border-emerald-500/30 text-emerald-400 font-mono text-xs">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span>Live Ledger Sync</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+              <span>Reconciliation unavailable</span>
             </div>
 
             <button
               id="open-refund-modal-btn"
-              onClick={() => {
-                setRefundFeedback(null);
-                setIsRefundModalOpen(true);
-              }}
-              className="px-4 py-2 rounded-xl text-xs font-semibold bg-rose-600/30 hover:bg-rose-600/40 border border-rose-500/40 text-rose-300 flex items-center gap-2 transition"
+              disabled
+              title="Refunds are unavailable until an M-Pesa reversal can be verified."
+              className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 border border-white/10 text-slate-500 flex items-center gap-2 cursor-not-allowed"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               Process Refund
@@ -243,8 +208,9 @@ export function AdminReconciliationPage() {
 
             <button
               id="export-pdf-btn"
-              onClick={() => exportFinancialReportPDF(totals, ledger, refunds)}
-              className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-900 hover:bg-slate-800 border border-white/10 text-slate-200 flex items-center gap-2 transition"
+              onClick={() => exportFinancialReportPDF(ledger, totals)}
+              disabled={!reconciliationAvailable}
+              className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-900 hover:bg-slate-800 border border-white/10 text-slate-200 flex items-center gap-2 transition disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <FileText className="w-3.5 h-3.5 text-rose-400" />
               PDF Audit
@@ -253,7 +219,8 @@ export function AdminReconciliationPage() {
             <button
               id="export-csv-btn"
               onClick={() => exportFinancialLedgerCSV(ledger)}
-              className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-900 hover:bg-slate-800 border border-white/10 text-slate-200 flex items-center gap-2 transition"
+              disabled={!reconciliationAvailable}
+              className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-900 hover:bg-slate-800 border border-white/10 text-slate-200 flex items-center gap-2 transition disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
               CSV Ledger
@@ -281,11 +248,15 @@ export function AdminReconciliationPage() {
               <DollarSign className="w-4 h-4 text-emerald-400" />
             </div>
             <div className="text-2xl font-bold text-white tracking-tight">
-              KES {totals.grossRevenueKes.toLocaleString()}
+              {reconciliationAvailable
+                ? `KES ${totals.grossRevenueKes.toLocaleString()}`
+                : "Unavailable"}
             </div>
             <div className="text-xs text-emerald-400 mt-2 flex items-center gap-1">
               <TrendingUp className="w-3.5 h-3.5" />
-              {totals.totalTicketsSold} tickets issued across all tiers
+              {reconciliationAvailable
+                ? `${totals.totalTicketsSold} tickets issued`
+                : "Verified settlement data unavailable"}
             </div>
           </div>
 
@@ -295,22 +266,30 @@ export function AdminReconciliationPage() {
               <ArrowDownRight className="w-4 h-4 text-rose-400" />
             </div>
             <div className="text-2xl font-bold text-rose-400 tracking-tight">
-              KES {totals.totalRefundsKes.toLocaleString()}
+              {reconciliationAvailable
+                ? `KES ${totals.totalRefundsKes.toLocaleString()}`
+                : "Unavailable"}
             </div>
             <div className="text-xs text-slate-400 mt-2">
-              {totals.totalRefundsCount} transaction(s) reversed
+              {reconciliationAvailable
+                ? `${totals.totalRefundsCount} transaction(s) reversed`
+                : "Refund verification unavailable"}
             </div>
           </div>
 
           <div className="bg-slate-900/60 border border-white/10 rounded-2xl p-5 relative overflow-hidden">
             <div className="flex items-center justify-between text-xs text-slate-400 mb-1.5">
-              <span>M-Pesa Gateway Fee (2.5%)</span>
+              <span>M-Pesa Gateway Fee</span>
               <CreditCard className="w-4 h-4 text-amber-400" />
             </div>
             <div className="text-2xl font-bold text-amber-400 tracking-tight">
-              KES {totals.platformFeesKes.toLocaleString()}
+              {reconciliationAvailable
+                ? `KES ${totals.platformFeesKes.toLocaleString()}`
+                : "Unavailable"}
             </div>
-            <div className="text-xs text-slate-400 mt-2">M-Pesa Paybill processing fees</div>
+            <div className="text-xs text-slate-400 mt-2">
+              Provider fees require settlement records
+            </div>
           </div>
 
           <div className="bg-gradient-to-br from-emerald-950/40 to-slate-900/80 border border-emerald-500/30 rounded-2xl p-5 relative overflow-hidden shadow-xl">
@@ -319,10 +298,12 @@ export function AdminReconciliationPage() {
               <ShieldCheck className="w-4 h-4 text-emerald-400" />
             </div>
             <div className="text-2xl font-bold text-emerald-300 tracking-tight">
-              KES {totals.netRevenueKes.toLocaleString()}
+              {reconciliationAvailable
+                ? `KES ${totals.netRevenueKes.toLocaleString()}`
+                : "Unavailable"}
             </div>
             <div className="text-xs text-emerald-400/80 mt-2">
-              Available for payout disbursement
+              {reconciliationAvailable ? "Verified settlement data" : "Settlement is not verified"}
             </div>
           </div>
         </div>
@@ -392,7 +373,9 @@ export function AdminReconciliationPage() {
                 {filteredLedger.length === 0 ? (
                   <tr>
                     <td colSpan={9} className="py-8 text-center text-slate-500">
-                      No reconciliation records matching your filter.
+                      {reconciliationAvailable
+                        ? "No reconciliation records matching your filter."
+                        : "Reconciliation is unavailable until verified M-Pesa settlement records are configured."}
                     </td>
                   </tr>
                 ) : (
@@ -429,16 +412,17 @@ export function AdminReconciliationPage() {
                         </span>
                       </td>
                       <td className="py-3.5 px-4 text-right">
-                        {item.status !== "Refunded" && (
+                        {reconciliationAvailable && item.status !== "Refunded" && (
                           <button
+                            disabled
                             onClick={() => {
                               setRefundOrderId(item.orderNumber);
                               setRefundAmount(item.amountKes);
                               setIsRefundModalOpen(true);
                             }}
-                            className="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-slate-800 hover:bg-slate-700 text-rose-300 border border-rose-500/20 transition"
+                            className="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-slate-800 text-slate-500 border border-white/10 cursor-not-allowed"
                           >
-                            Refund
+                            Unavailable
                           </button>
                         )}
                       </td>

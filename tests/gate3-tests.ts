@@ -143,10 +143,10 @@ async function runTests() {
   });
   assert(
     order3.success &&
-      order3.unitPriceKes === 3600 &&
-      order3.totalKes === 3600 &&
+      order3.unitPriceKes === 3200 &&
+      order3.totalKes === 3200 &&
       order3.admitsCount === 4,
-    "Authoritative Group of Four calculation: KES 3,600 (admits 4)",
+    "Authoritative Group of Four calculation: KES 3,200 (admits 4)",
   );
 
   // -------------------------------------------------------------

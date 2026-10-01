@@ -42,7 +42,7 @@ Early Bird — KES 1,000
 
 Couple — KES 1,800
 
-Group of Four — KES 3,600
+Group of Four — KES 3,200
 
 Do not invent additional event information.
 
@@ -290,7 +290,7 @@ KES 1,800
 
 GROUP OF FOUR
 
-KES 3,600
+KES 3,200
 
 Make the pricing hierarchy obvious.
 

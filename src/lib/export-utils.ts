@@ -270,7 +270,7 @@ export function exportFinancialReconciliationPdf(
   doc.setFontSize(9);
   doc.setTextColor(210, 210, 210);
   doc.text(
-    `Audited Gateway Payout Ledger | Presenter: Verve & Co. | Generated: ${new Date().toLocaleString("en-KE")}`,
+    `Financial Reconciliation Report | Presenter: Verve & Co. | Generated: ${new Date().toLocaleString("en-KE")}`,
     36,
     50,
   );
@@ -292,7 +292,7 @@ export function exportFinancialReconciliationPdf(
       color: [153, 27, 27],
     },
     {
-      label: "GATEWAY FEES (2.5%)",
+      label: "GATEWAY FEES",
       val: `KES ${totals.platformFeesKes.toLocaleString()}`,
       color: [180, 83, 9],
     },

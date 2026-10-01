@@ -36,7 +36,7 @@ export function generateEventJsonLd(options: EventSchemaOptions = {}) {
       url: `${siteUrl}/#tickets`,
       priceCurrency: "KES",
       lowPrice: "1000",
-      highPrice: "3600",
+      highPrice: "3200",
       offerCount: "3",
       offers: [
         {
@@ -57,7 +57,7 @@ export function generateEventJsonLd(options: EventSchemaOptions = {}) {
         {
           "@type": "Offer",
           name: "Group of Four",
-          price: "3600",
+          price: "3200",
           priceCurrency: "KES",
           url: `${siteUrl}/checkout?tier=group-of-four`,
         },

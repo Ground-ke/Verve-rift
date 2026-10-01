@@ -46,7 +46,7 @@ export const DEFAULT_TICKET_TYPES: TicketTypeRecord[] = [
     total_inventory: null, // NOT INVENTED
     reserved_count: 0,
     sold_count: 0,
-    purchase_limit: 10,
+    purchase_limit: null,
     sales_start: null,
     sales_end: null,
     is_configured: false,
@@ -66,7 +66,7 @@ export const DEFAULT_TICKET_TYPES: TicketTypeRecord[] = [
     total_inventory: null, // NOT INVENTED
     reserved_count: 0,
     sold_count: 0,
-    purchase_limit: 5,
+    purchase_limit: null,
     sales_start: null,
     sales_end: null,
     is_configured: false,
@@ -82,11 +82,11 @@ export const DEFAULT_TICKET_TYPES: TicketTypeRecord[] = [
     name: "Group of Four",
     description: "Entry for four",
     admits_count: 4,
-    price_kes: 3600,
+    price_kes: 3200,
     total_inventory: null, // NOT INVENTED
     reserved_count: 0,
     sold_count: 0,
-    purchase_limit: 3,
+    purchase_limit: null,
     sales_start: null,
     sales_end: null,
     is_configured: false,
