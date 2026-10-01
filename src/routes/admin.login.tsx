@@ -329,9 +329,7 @@ function AdminLogin() {
         {/* Security Notice */}
         <div className="pt-2 flex items-start gap-2 text-[11px] text-muted-foreground font-mono">
           <CheckCircle2 className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
-          <span>
-            Event staff access is verified against your authenticated account role.
-          </span>
+          <span>Event staff access is verified against your authenticated account role.</span>
         </div>
       </div>
 

@@ -40,7 +40,7 @@ export const Route = createFileRoute("/")({
       {
         name: "description",
         content:
-          "Hauntings of the Rift at The Lawns Restaurant, Nakuru. 31 October 2026 from 4 PM. Presented by Serve & Co. Tickets from KES 1,000.",
+          "Hauntings of the Rift at Top Cliff Lodge, Nakuru. 31 October 2026 from 4 PM. Presented by Serve & Co. Tickets from KES 1,000.",
       },
       { property: "og:title", content: "Hauntings of the Rift — Verve & Co." },
       {
@@ -69,7 +69,7 @@ const nav = [
 ];
 const heroFacts: Array<[string, LucideIcon]> = [
   ["31 October 2026", Clock3],
-  ["The Lawns · Nakuru", MapPin],
+  ["Top Cliff Lodge · Nakuru", MapPin],
   ["4 PM — late", Moon],
 ];
 const experiences: Array<[string, string, string, LucideIcon]> = [
@@ -86,7 +86,7 @@ const experiences: Array<[string, string, string, LucideIcon]> = [
 const faqs: Array<[string, string]> = [
   ["Who can attend?", "This is an 18+ event."],
   ["What is the dress code?", "Wickedly Fabulous."],
-  ["Where is the event?", "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru."],
+  ["Where is the event?", "Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru."],
   ["What time does it start?", "Doors open at 4 PM and the event continues till late."],
   [
     "How much are tickets?",
@@ -515,13 +515,13 @@ function Index() {
             <p className="mt-12 text-xs font-bold uppercase tracking-[.3em] text-lavender">
               The gathering place
             </p>
-            <h2 className="mt-3 text-5xl text-bone">The Lawns Restaurant</h2>
+            <h2 className="mt-3 text-5xl text-bone">Top Cliff Lodge</h2>
             <p className="mt-4 max-w-md text-lg text-muted-foreground">
-              Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru
+              Nakuru-Nairobi Highway, Free Area, Nakuru
             </p>
             <Button asChild variant="event" size="xl" className="mt-8">
               <a
-                href="https://www.google.com/maps/search/?api=1&query=Top+Cliff+Lodge+Nairobi"
+                href="https://www.google.com/maps/search/?api=1&query=Top+Cliff+Lodge+Nakuru"
                 target="_blank"
                 rel="noreferrer"
               >
@@ -553,8 +553,7 @@ function Index() {
             </p>
             <h2 className="mt-3 text-5xl text-bone">Questions from the crypt.</h2>
             <p className="mt-4 text-sm text-bone-muted leading-relaxed">
-              Everything you need to know about passes and the event venue,
-              and costume guidelines.
+              Everything you need to know about passes and the event venue, and costume guidelines.
             </p>
           </div>
 
@@ -589,7 +588,7 @@ function Index() {
 
       <section className="poster-grain px-4 py-24 text-center sm:px-6 lg:py-36">
         <p className="text-xs font-bold uppercase tracking-[.35em] text-lavender">
-          31 October 2026 · The Lawns, Nakuru
+          31 October 2026 · Top Cliff Lodge, Nakuru
         </p>
         <h2 className="mx-auto mt-4 max-w-5xl text-6xl leading-[.85] text-bone sm:text-8xl">
           Nakuru. Are you ready?

@@ -236,10 +236,7 @@ function PayRouteComponent() {
           currentOrder.status === "paid" ||
           currentOrder.status === "completed"
         ) {
-          const issued = await handleVerifyCompletedPayment(
-            currentOrder.orderId,
-            search.token!,
-          );
+          const issued = await handleVerifyCompletedPayment(currentOrder.orderId, search.token!);
           if (issued) {
             setPaymentPhase("paid");
             setPaymentError(null);
@@ -251,7 +248,9 @@ function PayRouteComponent() {
           setPaymentPhase("pending_approval");
         } else if (currentOrder.status === "rejected") {
           setPaymentPhase("failed");
-          setPaymentError(currentOrder.rejectionReason || "The organizer rejected this payment claim.");
+          setPaymentError(
+            currentOrder.rejectionReason || "The organizer rejected this payment claim.",
+          );
         }
       } catch (error) {
         console.error("Could not refresh order status:", error);

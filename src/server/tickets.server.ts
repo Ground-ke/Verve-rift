@@ -138,8 +138,8 @@ export class TicketsServerService {
         priceKes: Math.round(order.totalKes / quantity),
         issuedAt: new Date().toISOString(),
         venue: {
-          name: "The Lawns Restaurant",
-          address: "Oyster-Shell Rd, opposite Sarova Woodlands",
+          name: "Top Cliff Lodge",
+          address: "Nakuru-Nairobi Highway, Free Area",
           city: "Nakuru, Kenya",
           date: "Saturday, 31 October 2026",
           time: "4 PM till late",
@@ -187,8 +187,8 @@ export class TicketsServerService {
         priceKes: Math.round(order.totalKes / quantity),
         issuedAt: new Date().toISOString(),
         venue: {
-          name: "The Lawns Restaurant",
-          address: "Oyster-Shell Rd, opposite Sarova Woodlands",
+          name: "Top Cliff Lodge",
+          address: "Nakuru-Nairobi Highway, Free Area",
           city: "Nakuru, Kenya",
           date: "Saturday, 31 October 2026",
           time: "4 PM till late",

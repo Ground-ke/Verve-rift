@@ -186,8 +186,8 @@ export function TicketManagementTab() {
               scannedBy: ft.scannedBy || null,
               usedAt: ft.scannedAt || null,
               venue: {
-                name: "The Lawns Restaurant",
-                address: "Oyster-Shell Rd, opposite Sarova Woodlands",
+                name: "Top Cliff Lodge",
+                address: "Nakuru-Nairobi Highway, Free Area",
                 city: "Nakuru, Kenya",
                 date: "Saturday, 31 October 2026",
                 time: "4:00 PM till late",

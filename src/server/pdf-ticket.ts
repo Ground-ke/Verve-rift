@@ -446,7 +446,7 @@ export async function generatePureJsPdfTicket(options: TicketPdfOptions): Promis
     orderNumber = ticketCode,
     admitsCount = 1,
     eventDate = "Saturday, 31 October 2026",
-    venueName = "The Lawns Restaurant, Nakuru",
+    venueName = "Top Cliff Lodge, Nakuru",
   } = options;
 
   const doc = new jsPDF({

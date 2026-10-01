@@ -88,8 +88,7 @@ function TicketDemo() {
                   </div>
                 </dl>
                 <div className="mt-8 flex items-center gap-2 border-t border-border pt-5 text-sm text-muted-foreground">
-                  <Clock3 className="size-4" />
-                  4 PM till late · The Lawns Restaurant, Nakuru
+                  <Clock3 className="size-4" />4 PM till late · Top Cliff Lodge, Nakuru
                 </div>
               </div>
               <QRPlaceholder />
@@ -115,8 +114,8 @@ function TicketDemo() {
               ))}
             </div>
             <p className="mt-6 text-sm text-muted-foreground">
-              This preview contains sample data only. It does not represent a real ticket or
-              change a ticket&apos;s status.
+              This preview contains sample data only. It does not represent a real ticket or change
+              a ticket&apos;s status.
             </p>
           </aside>
         </div>

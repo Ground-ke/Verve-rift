@@ -9,7 +9,7 @@ export type IssuedTicketRow = {
 
 const EVENT_NAME = "Hauntings of the Rift";
 const EVENT_DATE = "2026-10-31T13:00:00.000Z"; // 4 PM EAT
-const EVENT_VENUE = "The Lawns Restaurant, Nakuru";
+const EVENT_VENUE = "Top Cliff Lodge, Nakuru";
 
 function secret(): string {
   const value = process.env["TICKET_HMAC_SECRET"];

@@ -162,7 +162,7 @@ export function generateEventIcs({
   ticketCode,
   customerName,
   ticketTier,
-  venueName = "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru",
+  venueName = "Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru",
 }: {
   ticketCode: string;
   customerName: string;
@@ -184,7 +184,7 @@ export function generateEventIcs({
     "DTEND;VALUE=DATE:20261101",
     "SUMMARY:Hauntings of the Rift",
     `DESCRIPTION:Event starts at 4 PM and runs till late. Ticket: ${ticketCode}\\nGuest: ${customerName}\\nTier: ${ticketTier}\\nVenue: ${venueName}\\nAge requirement: 18+.`,
-    "LOCATION:The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru, Kenya",
+    "LOCATION:Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru, Kenya",
     "STATUS:CONFIRMED",
     "ORGANIZER;CN=Verve & Co.:mailto:verve.n.co.ke@gmail.com",
     "SEQUENCE:0",
@@ -237,10 +237,7 @@ export async function sendTicketConfirmationEmail(params: {
   const name = params.buyerName || params.attendeeName || params.customerName || "Valued Attendee";
   const firstTicket = params.tickets?.[0];
   const code = params.ticketCode || firstTicket?.ticketNumber;
-  const tier =
-    params.ticketTier ||
-    params.tierName ||
-    firstTicket?.tierName;
+  const tier = params.ticketTier || params.tierName || firstTicket?.tierName;
   const qty = params.quantity ?? params.tickets?.length ?? (params.ticketCode ? 1 : undefined);
   const admitsCount = params.admitsCount ?? firstTicket?.admitsCount;
   const total = params.totalKes;
@@ -258,12 +255,11 @@ export async function sendTicketConfirmationEmail(params: {
   ) {
     return {
       success: false,
-      error: "Ticket email requires an issued ticket code, QR signature, tier, quantity, admits count, and total.",
+      error:
+        "Ticket email requires an issued ticket code, QR signature, tier, quantity, admits count, and total.",
     };
   }
-  const venue =
-    params.venueName ||
-    "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru";
+  const venue = params.venueName || "Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru";
   const eventDate = params.eventDate || "Saturday, 31 October 2026";
   const siteUrl = getSiteBaseUrl();
   const primaryTicketUrl =
@@ -413,7 +409,7 @@ export async function sendTicketConfirmationEmail(params: {
 export async function sendEventReminder24hEmail({
   to,
   customerName,
-  venueName = "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru",
+  venueName = "Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru",
   gateOpeningTime = "16:00 EAT",
   ticketTier = "General Admission Pass",
   ticketUrl = "https://hauntingsoftherift.co.ke",
@@ -593,7 +589,7 @@ export async function sendBroadcastEmail({
               You received this notice because you purchased a pass or subscribed to updates for Hauntings of the Rift.
             </p>
             <p style="color:#574E60; font-size:11px; margin:0;">
-              The Lawns Restaurant, Nakuru • 31 October 2026 • 18+
+              Top Cliff Lodge, Nakuru • 31 October 2026 • 18+
             </p>
           </div>
         </div>
@@ -633,7 +629,8 @@ export async function sendMpesaReceivedAcknowledgmentEmail(params: {
   ) {
     return {
       success: false,
-      error: "Payment acknowledgment requires the server-calculated ticket tier, quantity, and order total.",
+      error:
+        "Payment acknowledgment requires the server-calculated ticket tier, quantity, and order total.",
     };
   }
 
@@ -651,7 +648,7 @@ export async function sendMpesaReceivedAcknowledgmentEmail(params: {
     total_amount: params.totalKes,
     order_url: orderUrl,
     event_date: "Saturday, 31 October 2026",
-    venue_name: "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru",
+    venue_name: "Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru",
   });
 
   return dispatchEmail({

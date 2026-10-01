@@ -612,8 +612,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         qr_hash: body["qr_hash"] || body["qrHash"],
         event_id: body["event_id"] || body["eventId"] || "hauntings-of-the-rift-2026",
         staff_name: body["staff_name"] || body["staffName"] || "Gate Security Staff",
-        gate_location:
-          body["gate_location"] || body["gateLocation"] || "Main Entrance, The Lawns Restaurant",
+        gate_location: body["gate_location"] || body["gateLocation"] || "Main Top Cliff Entrance",
       });
 
       if (!parseResult.success) {
@@ -1333,7 +1332,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         venueNameOrLocation:
           body["venueNameOrLocation"] ||
           body["venue_name"] ||
-          "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru",
+          "Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru",
         gateOpeningTime:
           body["gateOpeningTime"] || body["gate_opening_time"] || "4:00 PM till late",
         fastPassLink: body["fastPassLink"] || body["fast_pass_link"],
@@ -1377,7 +1376,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
             "https://hauntingsoftherift.co.ke/ticket/demo",
           venueNameOrLocation:
             data.venueNameOrLocation ||
-            "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru",
+            "Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru",
           gateOpeningTime: data.gateOpeningTime || "4:00 PM till late",
           fastPassLink:
             data.fastPassLink ||
@@ -1423,7 +1422,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         order_id = "HR-2026-CONFIRMED",
         event_date = "Saturday, 31 October 2026",
         ticket_url = "https://hauntingsoftherift.co.ke/ticket/demo",
-        venue_name = "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru",
+        venue_name = "Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru",
         gate_opening_time = "4:00 PM till late",
         refund_amount = "1,800",
         payment_ref = "REV-MPESA-DEFAULT",
@@ -1538,12 +1537,12 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       } else if (template === "event_reminder_24h") {
         html = generateEventReminder24hEmailHtml({
           customer_name: "Mwangi Karanja",
-          venue_name: "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru",
+          venue_name: "Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru",
           gate_opening_time: "4:00 PM till late",
           ticket_tier: "VIP Rift Access Pass",
           ticket_url: "https://hauntingsoftherift.co.ke/ticket/HR-1049-9941",
         });
-        plaintext = `⏰ *TOMORROW AT THE RIFT* ⏰\n\nHey Mwangi Karanja, the event is tomorrow.\n\n📍 *Venue:* The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru\n🚪 *Event time:* 4:00 PM till late\n\n👇 *Have your QR code ready at the gate:*\nhttps://hauntingsoftherift.co.ke/ticket/HR-1049-9941\n\nEntry is strictly 18+ with valid ID.`;
+        plaintext = `⏰ *TOMORROW AT THE RIFT* ⏰\n\nHey Mwangi Karanja, the event is tomorrow.\n\n📍 *Venue:* Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru\n🚪 *Event time:* 4:00 PM till late\n\n👇 *Have your QR code ready at the gate:*\nhttps://hauntingsoftherift.co.ke/ticket/HR-1049-9941\n\nEntry is strictly 18+ with valid ID.`;
       } else if (template === "refund_notice") {
         html = generateRefundNoticeEmailHtml({
           customer_name: "Mwangi Karanja",
@@ -1742,7 +1741,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         to: email,
         subject: "Welcome to Verve & Co. — Hauntings of the Rift Updates",
         headline: "You're on the Guest List for Rift Updates",
-        message: `Greetings ${name || "guest"},\n\nYou have subscribed to updates for Hauntings of the Rift on 31 October 2026 at The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru.`,
+        message: `Greetings ${name || "guest"},\n\nYou have subscribed to updates for Hauntings of the Rift on 31 October 2026 at Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru.`,
         ctaText: "Explore Event & Passes",
         ctaUrl: "https://verve-hauntings.vercel.app/checkout",
       });
