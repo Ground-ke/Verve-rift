@@ -1,8 +1,9 @@
-import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { useAdminAuth } from "@/lib/auth/admin-auth-context";
 import { VerveIcon } from "@/components/brand/verve-logo";
 import {
+  KeyRound,
   Lock,
   Mail,
   ArrowRight,
@@ -12,7 +13,6 @@ import {
   LogOut,
   Eye,
   EyeOff,
-  Shield,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,7 +34,6 @@ export const Route = createFileRoute("/admin/login")({
 });
 
 function AdminLogin() {
-  const navigate = useNavigate();
   const { signInWithEmail, signInWithGoogle, signOut, user, isAuthenticated, isAdmin, isLoading } =
     useAdminAuth();
 
@@ -55,7 +54,7 @@ function AdminLogin() {
     return "/admin";
   };
 
-  // If already authenticated as admin, redirect to admin dashboard
+  // Staff sessions go directly to the dashboard; customer sessions stay on this page.
   useEffect(() => {
     if (!isLoading && isAuthenticated && isAdmin) {
       const timer = setTimeout(() => {
@@ -63,7 +62,11 @@ function AdminLogin() {
       }, 300);
       return () => clearTimeout(timer);
     }
-  }, [isLoading, isAuthenticated, isAdmin]);
+    if (!isLoading && isAuthenticated && user?.role === "customer") {
+      setErrorMessage("This account is not assigned an event staff role.");
+      void signOut();
+    }
+  }, [isLoading, isAuthenticated, isAdmin, user?.role, signOut]);
 
   // 1. Sign In with Google
   const handleGoogleSignIn = async () => {
@@ -71,12 +74,7 @@ function AdminLogin() {
     setErrorMessage(null);
     try {
       const res = await signInWithGoogle();
-      if (res.success) {
-        toast.success("Authenticated as Event Administrator", {
-          description: "Welcome to Verve & Co. Operations Dashboard",
-        });
-        window.location.href = getAdminRedirect();
-      } else {
+      if (!res.success) {
         setErrorMessage(res.message || "Failed to sign in with Google.");
       }
     } catch (err) {
@@ -95,7 +93,7 @@ function AdminLogin() {
     try {
       const res = await signInWithEmail(email, password);
       if (res.success) {
-        toast.success("Authenticated as Event Administrator", {
+        toast.success("Event staff sign-in successful", {
           description: `Logged in as ${email}`,
         });
         window.location.href = getAdminRedirect();
@@ -177,14 +175,18 @@ function AdminLogin() {
           </div>
         )}
 
-        {/* Sign In with Google */}
+        {/* ========================================================================= */}
+        {/* METHOD 1: SIGN IN WITH GOOGLE */}
+        {/* ========================================================================= */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-xs font-mono uppercase tracking-wider text-bone flex items-center gap-1.5 font-bold">
-              <Shield className="w-3.5 h-3.5 text-amber-400" />
+              <span className="w-5 h-5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center text-[10px]">
+                1
+              </span>
               Sign In with Google
             </span>
-            <span className="text-[10px] font-mono text-muted-foreground">Authorized Staff</span>
+            <span className="text-[10px] font-mono text-muted-foreground">Recommended</span>
           </div>
 
           <Button
@@ -233,14 +235,25 @@ function AdminLogin() {
           <div className="h-px bg-border/80 flex-1" />
         </div>
 
-        {/* Sign In with Email */}
+        {/* ========================================================================= */}
+        {/* METHOD 2: SIGN IN WITH EMAIL */}
+        {/* ========================================================================= */}
         <form onSubmit={handleSubmitEmail} className="space-y-4">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-mono uppercase tracking-wider text-bone flex items-center gap-1.5 font-bold">
+              <span className="w-5 h-5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center text-[10px]">
+                2
+              </span>
+              Sign In with Email
+            </span>
+          </div>
+
           <div className="space-y-1.5">
             <Label
               htmlFor="admin-email"
               className="text-xs text-lavender uppercase font-mono tracking-wider"
             >
-              Staff / Organizer Email
+              Organizer Email
             </Label>
             <div className="relative">
               <Input
@@ -248,7 +261,7 @@ function AdminLogin() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="name@verve.co.ke"
+                placeholder="verve.n.co.ke@gmail.com"
                 required
                 className="bg-background border-border text-bone font-mono text-sm pl-9"
               />
@@ -286,7 +299,7 @@ function AdminLogin() {
                 type={showPassword ? "text" : "password"}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••••••"
+                placeholder="Enter your password"
                 required
                 className="bg-background border-border text-bone font-mono text-sm pl-9 pr-9"
               />
@@ -302,11 +315,11 @@ function AdminLogin() {
             {isSubmitting ? (
               <span className="flex items-center justify-center gap-2">
                 <span className="w-3.5 h-3.5 border-2 border-bone border-t-transparent rounded-full animate-spin" />
-                <span>Authenticating...</span>
+                <span>Authenticating Organizer...</span>
               </span>
             ) : (
               <span className="flex items-center justify-center gap-2">
-                <span>Sign In with Credentials</span>
+                <span>Sign In with Email</span>
                 <ArrowRight className="w-4 h-4" />
               </span>
             )}
@@ -317,8 +330,7 @@ function AdminLogin() {
         <div className="pt-2 flex items-start gap-2 text-[11px] text-muted-foreground font-mono">
           <CheckCircle2 className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
           <span>
-            Protected by Cloud Firestore access rules, server-side authorization tokens, and
-            immutable audit logs.
+            Event staff access is verified against your authenticated account role.
           </span>
         </div>
       </div>

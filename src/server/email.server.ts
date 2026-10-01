@@ -140,11 +140,15 @@ async function dispatchEmail({
     }
   }
 
-  // Simulation mode (logs safely in dev / test when SMTP credentials are not yet configured)
+  // Do not report simulated delivery as a successful email send.
   console.info(
     `[Email Service - Simulated Gmail SMTP] Email to ${Array.isArray(to) ? to.join(", ") : to}: "${subject}" (Attachments: ${attachments?.map((a) => a.filename).join(", ") || "None"})`,
   );
-  return { success: true, simulated: true };
+  return {
+    success: false,
+    simulated: true,
+    error: "Email delivery is not configured; the message was not sent.",
+  };
 }
 
 // -----------------------------------------------------------------------------
@@ -158,7 +162,7 @@ export function generateEventIcs({
   ticketCode,
   customerName,
   ticketTier,
-  venueName = "The Lawns Restaurant, Nakuru",
+  venueName = "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru",
 }: {
   ticketCode: string;
   customerName: string;
@@ -166,7 +170,7 @@ export function generateEventIcs({
   venueName?: string;
 }): string {
   const now = new Date().toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
-  // Event: Sat 31 Oct 2026 16:00 EAT (13:00 UTC) to Sun 01 Nov 2026 04:00 EAT (01:00 UTC)
+  // The event date and start time are confirmed; no end time has been supplied.
   return [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
@@ -176,10 +180,10 @@ export function generateEventIcs({
     "BEGIN:VEVENT",
     `UID:hauntings-rift-${ticketCode}@verve.co.ke`,
     `DTSTAMP:${now}`,
-    "DTSTART:20261031T130000Z",
-    "DTEND:20261101T010000Z",
-    "SUMMARY:Hauntings of the Rift: Halloween Experience by Verve & Co.",
-    `DESCRIPTION:Official Ticket Pass for ${customerName}\\nRSVP Code: ${ticketCode}\\nTier: ${ticketTier}\\nVenue: ${venueName}\\nStrictly 18+ with Valid ID. Present your QR code at the entrance gate.`,
+    "DTSTART;VALUE=DATE:20261031",
+    "DTEND;VALUE=DATE:20261101",
+    "SUMMARY:Hauntings of the Rift",
+    `DESCRIPTION:Event starts at 4 PM and runs till late. Ticket: ${ticketCode}\\nGuest: ${customerName}\\nTier: ${ticketTier}\\nVenue: ${venueName}\\nAge requirement: 18+.`,
     "LOCATION:The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru, Kenya",
     "STATUS:CONFIRMED",
     "ORGANIZER;CN=Verve & Co.:mailto:verve.n.co.ke@gmail.com",
@@ -188,7 +192,7 @@ export function generateEventIcs({
     "BEGIN:VALARM",
     "TRIGGER:-PT24H",
     "ACTION:DISPLAY",
-    "DESCRIPTION:Hauntings of the Rift begins in 24 hours at The Lawns Restaurant, Nakuru!",
+    "DESCRIPTION:Hauntings of the Rift takes place on 31 October 2026.",
     "END:VALARM",
     "END:VEVENT",
     "END:VCALENDAR",
@@ -231,19 +235,35 @@ export async function sendTicketConfirmationEmail(params: {
   qrHash?: string;
 }): Promise<{ success: boolean; id?: string; simulated?: boolean; error?: string }> {
   const name = params.buyerName || params.attendeeName || params.customerName || "Valued Attendee";
-  const code =
-    params.ticketCode ||
-    params.orderNumber ||
-    (params.tickets && params.tickets[0]?.ticketNumber) ||
-    `HR-${Math.floor(1000 + Math.random() * 9000)}-${Math.floor(1000 + Math.random() * 9000)}`;
+  const firstTicket = params.tickets?.[0];
+  const code = params.ticketCode || firstTicket?.ticketNumber;
   const tier =
     params.ticketTier ||
     params.tierName ||
-    (params.tickets && params.tickets[0]?.tierName) ||
-    "General Admission Pass";
-  const qty = params.quantity || params.admitsCount || params.tickets?.length || 1;
-  const total = params.totalKes ?? qty * 1000;
-  const venue = params.venueName || "The Lawns Restaurant, Nakuru";
+    firstTicket?.tierName;
+  const qty = params.quantity ?? params.tickets?.length ?? (params.ticketCode ? 1 : undefined);
+  const admitsCount = params.admitsCount ?? firstTicket?.admitsCount;
+  const total = params.totalKes;
+  const qrHash = params.qrHash || firstTicket?.qrHash;
+  if (
+    !code ||
+    !tier ||
+    !Number.isInteger(qty) ||
+    !qty ||
+    !Number.isFinite(total) ||
+    total < 0 ||
+    !Number.isInteger(admitsCount) ||
+    !admitsCount ||
+    !qrHash
+  ) {
+    return {
+      success: false,
+      error: "Ticket email requires an issued ticket code, QR signature, tier, quantity, admits count, and total.",
+    };
+  }
+  const venue =
+    params.venueName ||
+    "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru";
   const eventDate = params.eventDate || "Saturday, 31 October 2026";
   const siteUrl = getSiteBaseUrl();
   const primaryTicketUrl =
@@ -259,10 +279,10 @@ export async function sendTicketConfirmationEmail(params: {
       ticketCode: code,
       customerName: name,
       tierName: tier,
-      admitsCount: qty,
+      admitsCount,
       orderNumber: params.orderNumber || code,
       totalKes: total,
-      qrHash: params.qrHash || (params.tickets && params.tickets[0]?.qrHash),
+      qrHash,
       eventDate,
       venueName: venue,
     });
@@ -272,10 +292,10 @@ export async function sendTicketConfirmationEmail(params: {
       ticketCode: code,
       customerName: name,
       tierName: tier,
-      admitsCount: qty,
+      admitsCount,
       orderNumber: params.orderNumber || code,
       totalKes: total,
-      qrHash: params.qrHash || (params.tickets && params.tickets[0]?.qrHash),
+      qrHash,
       eventDate,
       venueName: venue,
     });
@@ -296,7 +316,8 @@ export async function sendTicketConfirmationEmail(params: {
     order: params.orderNumber || code,
     tier,
     holder: name,
-    admits: qty,
+    admits: admitsCount,
+    hash: qrHash,
     event: "HALLOWEEN_RIFT_2026",
   });
   let qrBuffer: Buffer;
@@ -380,7 +401,7 @@ export async function sendTicketConfirmationEmail(params: {
 
   return dispatchEmail({
     to: params.to,
-    subject: `Your Ticket for Hauntings of the Rift: Halloween Experience by Verve & Co.`,
+    subject: "Your Ticket for Hauntings of the Rift",
     html: emailHtml,
     attachments,
   });
@@ -392,7 +413,7 @@ export async function sendTicketConfirmationEmail(params: {
 export async function sendEventReminder24hEmail({
   to,
   customerName,
-  venueName = "The Lawns Restaurant, Nakuru",
+  venueName = "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru",
   gateOpeningTime = "16:00 EAT",
   ticketTier = "General Admission Pass",
   ticketUrl = "https://hauntingsoftherift.co.ke",
@@ -572,7 +593,7 @@ export async function sendBroadcastEmail({
               You received this notice because you purchased a pass or subscribed to updates for Hauntings of the Rift.
             </p>
             <p style="color:#574E60; font-size:11px; margin:0;">
-              The Lawns Restaurant, Nakuru • 31 October 2026 • 18+ Strictly
+              The Lawns Restaurant, Nakuru • 31 October 2026 • 18+
             </p>
           </div>
         </div>
@@ -589,7 +610,7 @@ export async function sendBroadcastEmail({
 
 /**
  * Sends automated M-Pesa submission acknowledgment email to customer
- * Reassures buyer that payment reference was received and ticket will be issued upon 24-hr verification.
+ * Confirms receipt of a payment claim without implying that payment was verified.
  */
 export async function sendMpesaReceivedAcknowledgmentEmail(params: {
   to: string;
@@ -602,6 +623,20 @@ export async function sendMpesaReceivedAcknowledgmentEmail(params: {
   orderId?: string;
   checkoutToken?: string;
 }): Promise<{ success: boolean; id?: string; simulated?: boolean; error?: string }> {
+  if (
+    !params.ticketTier ||
+    !Number.isInteger(params.quantity) ||
+    !params.quantity ||
+    typeof params.totalKes !== "number" ||
+    !Number.isFinite(params.totalKes) ||
+    params.totalKes < 0
+  ) {
+    return {
+      success: false,
+      error: "Payment acknowledgment requires the server-calculated ticket tier, quantity, and order total.",
+    };
+  }
+
   const siteUrl = getSiteBaseUrl();
   const orderUrl = params.orderId
     ? `${siteUrl}/pay?order=${params.orderId}${params.checkoutToken ? `&token=${params.checkoutToken}` : ""}`
@@ -611,17 +646,17 @@ export async function sendMpesaReceivedAcknowledgmentEmail(params: {
     customer_name: params.customerName || "Valued Attendee",
     order_number: params.orderNumber,
     mpesa_code: params.mpesaCode,
-    ticket_tier: params.ticketTier || "General Admission Pass",
-    quantity: params.quantity || 1,
-    total_amount: params.totalKes || 1000,
+    ticket_tier: params.ticketTier,
+    quantity: params.quantity,
+    total_amount: params.totalKes,
     order_url: orderUrl,
     event_date: "Saturday, 31 October 2026",
-    venue_name: "The Lawns Restaurant, Nakuru",
+    venue_name: "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru",
   });
 
   return dispatchEmail({
     to: params.to,
-    subject: `M-Pesa Payment Received: Order #${params.orderNumber} (${params.mpesaCode}) — Hauntings of the Rift`,
+    subject: `M-Pesa payment claim received for order #${params.orderNumber} — Hauntings of the Rift`,
     html: emailHtml,
   });
 }

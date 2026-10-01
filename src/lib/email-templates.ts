@@ -40,7 +40,7 @@ export function generateBookingConfirmationEmailHtml(params: {
     qr_data_url,
     banner_cid,
     banner_url,
-    venue_name = "The Lawns Restaurant, Nakuru",
+    venue_name = "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru",
     calendar_url,
   } = params;
 
@@ -51,10 +51,12 @@ export function generateBookingConfirmationEmailHtml(params: {
   const defaultCalendarUrl =
     calendar_url ||
     `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(
-      "Hauntings of the Rift: Halloween Experience by Verve & Co.",
-    )}&dates=20261031T130000Z/20261101T010000Z&details=${encodeURIComponent(
-      `Official Admission Pass: ${order_id}\nGuest: ${customer_name}\nTier: ${ticket_tier} (x${quantity})\nTotal: KES ${total_amount}\nVenue: ${venue_name}\nStrictly 18+ with Valid ID. Present your QR code at the gate.`,
-    )}&location=${encodeURIComponent("The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru, Kenya")}`;
+      "Hauntings of the Rift",
+    )}&dates=20261031/20261101&details=${encodeURIComponent(
+      `Event starts at 4 PM and runs till late.\nTicket reference: ${order_id}\nGuest: ${customer_name}\nTier: ${ticket_tier} (x${quantity})\nTotal: KES ${total_amount}\nVenue: ${venue_name}\nAge requirement: 18+.`,
+    )}&location=${encodeURIComponent(
+      "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru, Kenya",
+    )}`;
 
   // Banner image source (CID for offline/embedded, fallback to hosted or static URL)
   const bannerSrc = banner_cid
@@ -62,17 +64,14 @@ export function generateBookingConfirmationEmailHtml(params: {
     : banner_url || "https://verve-hauntings.vercel.app/event-banner.jpg";
 
   // QR code image source
-  const qrSrc = qr_code_cid
-    ? `cid:${qr_code_cid}`
-    : qr_data_url ||
-      `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(
-        JSON.stringify({
-          order: order_id,
-          holder: customer_name,
-          tier: ticket_tier,
-          event: "HALLOWEEN_RIFT_2026",
-        }),
-      )}`;
+  const qrSrc = qr_code_cid ? `cid:${qr_code_cid}` : qr_data_url;
+  const qrMarkup = qrSrc
+    ? `<div style="text-align: center; margin: 28px 0 24px 0;">
+        <div style="background-color: #ffffff; padding: 16px; border-radius: 10px; display: inline-block; box-shadow: 0 6px 20px rgba(0,0,0,0.5);">
+          <img src="${qrSrc}" alt="Admission Pass QR Code" width="220" height="220" style="display: block; margin: 0 auto;" />
+        </div>
+      </div>`
+    : `<p style="text-align: center; margin: 28px 0 24px 0; color: #9ca3af;">Open your ticket using the link below to view its current details.</p>`;
 
   // Google Schema.org EventReservation JSON-LD microdata
   const jsonLd = JSON.stringify({
@@ -88,13 +87,12 @@ export function generateBookingConfirmationEmailHtml(params: {
       "@type": "Event",
       name: "Hauntings of the Rift: Halloween Experience by Verve & Co.",
       startDate: "2026-10-31T16:00:00+03:00",
-      endDate: "2026-11-01T04:00:00+03:00",
       location: {
         "@type": "Place",
         name: venue_name,
         address: {
           "@type": "PostalAddress",
-          streetAddress: "Nakuru-Nairobi Highway",
+          streetAddress: "Oyster-Shell Rd, opposite Sarova Woodlands",
           addressLocality: "Nakuru",
           addressCountry: "KE",
         },
@@ -174,12 +172,8 @@ export function generateBookingConfirmationEmailHtml(params: {
                 </div>
               </div>
 
-              <!-- 4. Crisp High-Contrast Centered QR Code Box -->
-              <div style="text-align: center; margin: 28px 0 24px 0;">
-                <div style="background-color: #ffffff; padding: 16px; border-radius: 10px; display: inline-block; box-shadow: 0 6px 20px rgba(0,0,0,0.5);">
-                  <img src="${qrSrc}" alt="Admission Pass QR Code" width="220" height="220" style="display: block; margin: 0 auto;" />
-                </div>
-              </div>
+              <!-- 4. Verified ticket QR code, when available -->
+              ${qrMarkup}
 
               <!-- 5. Blue Primary Action Button (Matches Template) -->
               <div style="text-align: center; margin: 20px 0 12px 0;">
@@ -209,7 +203,7 @@ export function generateBookingConfirmationEmailHtml(params: {
                 Sent by Verve &amp; Co. &bull; Please do not reply to this automated message.
               </p>
               <p style="margin: 0; font-size: 10px; color: #4b5563;">
-                The Lawns Restaurant, Nakuru &bull; Strictly 18+ with Valid Government ID
+                The Lawns Restaurant, Nakuru &bull; 18+
               </p>
             </td>
           </tr>
@@ -431,7 +425,7 @@ export function generateMpesaReceivedEmailHtml(params: {
     total_amount,
     order_url = "https://verve-hauntings.vercel.app",
     event_date = "Saturday, 31 October 2026",
-    venue_name = "The Lawns Restaurant, Nakuru",
+    venue_name = "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru",
   } = params;
 
   return `<!DOCTYPE html>
@@ -467,10 +461,10 @@ export function generateMpesaReceivedEmailHtml(params: {
             <td style="padding: 24px 28px 12px 28px;">
               <div style="background-color: rgba(201, 168, 76, 0.1); border: 1px solid rgba(201, 168, 76, 0.35); border-radius: 8px; padding: 14px 18px; text-align: center;">
                 <span style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.15em; color: #E5C365;">
-                  ⏳ Payment Received • Verification in Progress
+                  ⏳ Payment Message Submitted • Awaiting Organizer Review
                 </span>
                 <p style="margin: 4px 0 0 0; font-size: 12px; color: #D5CFDE;">
-                  Standard Processing SLA: Within 24 hours of submission
+                  A submitted message is not confirmation of payment.
                 </p>
               </div>
             </td>
@@ -483,7 +477,7 @@ export function generateMpesaReceivedEmailHtml(params: {
                 Hi <strong>${customer_name}</strong>,
               </p>
               <p style="margin: 0 0 16px 0; font-size: 14px; line-height: 1.6; color: #C4BFCC;">
-                We have successfully received your M-Pesa transaction reference for order <strong style="color: #F5F2EB;">#${order_number}</strong>. Our finance desk is cross-referencing your transaction code against our official Safaricom statement.
+                We received the M-Pesa message or reference submitted for order <strong style="color: #F5F2EB;">#${order_number}</strong>. The organizer must review and approve the payment before a ticket is issued.
               </p>
             </td>
           </tr>
@@ -505,7 +499,7 @@ export function generateMpesaReceivedEmailHtml(params: {
                   <td align="right" style="padding: 12px 16px; border-bottom: 1px solid #1E1824; font-size: 13px; color: #F5F2EB;">${quantity} Pass(es)</td>
                 </tr>
                 <tr>
-                  <td style="padding: 12px 16px; font-size: 12px; color: #8F8799; text-transform: uppercase; letter-spacing: 0.05em;">Amount Submitted</td>
+                  <td style="padding: 12px 16px; font-size: 12px; color: #8F8799; text-transform: uppercase; letter-spacing: 0.05em;">Order Total (Not Payment Verification)</td>
                   <td align="right" style="padding: 12px 16px; font-size: 15px; font-weight: 800; color: #10B981;">KES ${typeof total_amount === "number" ? total_amount.toLocaleString() : total_amount}</td>
                 </tr>
               </table>
@@ -520,10 +514,10 @@ export function generateMpesaReceivedEmailHtml(params: {
               </h3>
               <ol style="margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.7; color: #C4BFCC;">
                 <li style="margin-bottom: 8px;">
-                  <strong style="color: #F5F2EB;">Verification:</strong> Our team checks the reference against our merchant statement within 24 hours.
+                  <strong style="color: #F5F2EB;">Review:</strong> The organizer checks the submitted message. Timing may vary.
                 </li>
                 <li style="margin-bottom: 8px;">
-                  <strong style="color: #F5F2EB;">Automated Ticket Delivery:</strong> The moment payment is verified, your official cryptographically signed admission pass with QR code, downloadable PDF, and calendar invite will be automatically delivered to this email address.
+                  <strong style="color: #F5F2EB;">Ticket issuance:</strong> A ticket is issued only after the organizer approves the payment. Check your order status for updates.
                 </li>
                 <li>
                   <strong style="color: #F5F2EB;">Gate Entry:</strong> Simply display your digital QR pass on your phone upon arrival on 31 October 2026.
@@ -548,7 +542,7 @@ export function generateMpesaReceivedEmailHtml(params: {
                 Questions or corrections? Reply directly to this email or write to <a href="mailto:verve.n.co.ke@gmail.com" style="color: #C9A84C; text-decoration: none;">verve.n.co.ke@gmail.com</a>.
               </p>
               <p style="margin: 0; font-size: 10px; color: #5B5466;">
-                Hauntings of the Rift • Official Event Operations • The Lawns Restaurant, Nakuru
+                Hauntings of the Rift • The Lawns Restaurant, Nakuru
               </p>
             </td>
           </tr>

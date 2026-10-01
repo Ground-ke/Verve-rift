@@ -22,6 +22,14 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 
+const mpesaPaymentDetails = {
+  paybill: import.meta.env["VITE_MPESA_PAYBILL"]?.trim() || "",
+  account: import.meta.env["VITE_MPESA_ACCOUNT"]?.trim() || "",
+  accountName: import.meta.env["VITE_MPESA_ACCOUNT_NAME"]?.trim() || "",
+};
+
+const isMpesaPaymentConfigured = Object.values(mpesaPaymentDetails).every(Boolean);
+
 export type PaymentPhase =
   "idle" | "submitting" | "pending_approval" | "paid" | "failed" | "timed_out" | "review";
 
@@ -87,6 +95,11 @@ export const PaymentStatusCard: React.FC<PaymentStatusCardProps> = ({
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setFormError(null);
+
+    if (!isMpesaPaymentConfigured) {
+      setFormError("M-Pesa payment details have not been configured. Please contact the organizers.");
+      return;
+    }
 
     const cleanInput = rawMpesaInput.trim();
     if (!cleanInput) {
@@ -191,9 +204,16 @@ export const PaymentStatusCard: React.FC<PaymentStatusCardProps> = ({
             Official Safaricom M-Pesa Paybill
           </h2>
           <p className="text-xs text-muted-foreground mt-1 font-mono">
-            Pay via your M-Pesa App or SIM Toolkit, then paste the confirmation message below:
+            Pay using the details below, then paste the confirmation message for organizer review:
           </p>
         </div>
+
+        {!isMpesaPaymentConfigured && (
+          <p role="alert" className="border border-destructive/40 bg-destructive/10 p-3 text-sm text-red-300">
+            M-Pesa payment details have not been configured. Do not send money until the organizers
+            publish verified payment instructions.
+          </p>
+        )}
 
         <div className="grid gap-3 sm:grid-cols-4 bg-background/60 border border-amber-500/20 p-4">
           <div>
@@ -201,11 +221,14 @@ export const PaymentStatusCard: React.FC<PaymentStatusCardProps> = ({
               Business No.
             </span>
             <div className="flex items-center justify-between mt-1">
-              <span className="font-mono text-xl font-bold text-amber-300">522533</span>
+              <span className="font-mono text-xl font-bold text-amber-300">
+                {mpesaPaymentDetails.paybill || "Not configured"}
+              </span>
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => handleCopy("522533", "Business No")}
+                onClick={() => handleCopy(mpesaPaymentDetails.paybill, "Business No")}
+                disabled={!isMpesaPaymentConfigured}
                 className="h-7 px-2 text-xs text-amber-300 hover:bg-amber-950/40"
                 title="Copy Business No"
               >
@@ -223,11 +246,14 @@ export const PaymentStatusCard: React.FC<PaymentStatusCardProps> = ({
               Account No.
             </span>
             <div className="flex items-center justify-between mt-1">
-              <span className="font-mono text-xl font-bold text-bone">8142205</span>
+              <span className="font-mono text-xl font-bold text-bone">
+                {mpesaPaymentDetails.account || "Not configured"}
+              </span>
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => handleCopy("8142205", "Account No")}
+                onClick={() => handleCopy(mpesaPaymentDetails.account, "Account No")}
+                disabled={!isMpesaPaymentConfigured}
                 className="h-7 px-2 text-xs text-bone hover:bg-card"
                 title="Copy Account No"
               >
@@ -246,12 +272,13 @@ export const PaymentStatusCard: React.FC<PaymentStatusCardProps> = ({
             </span>
             <div className="flex items-center justify-between mt-1">
               <span className="font-mono text-sm font-bold text-emerald-300 truncate">
-                vervenexus
+                {mpesaPaymentDetails.accountName || "Not configured"}
               </span>
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => handleCopy("vervenexus", "Account Name")}
+                onClick={() => handleCopy(mpesaPaymentDetails.accountName, "Account Name")}
+                disabled={!isMpesaPaymentConfigured}
                 className="h-7 px-2 text-xs text-emerald-300 hover:bg-emerald-950/40"
                 title="Copy Account Name"
               >
@@ -296,11 +323,12 @@ export const PaymentStatusCard: React.FC<PaymentStatusCardProps> = ({
           </div>
           <p className="text-bone-muted">
             1. Open M-Pesa &rarr; Lipa na M-Pesa &rarr; Paybill &rarr; Business:{" "}
-            <strong className="text-amber-300 font-mono">522533</strong> &rarr; Account:{" "}
-            <strong className="text-bone font-mono">8142205</strong>
+            <strong className="text-amber-300 font-mono">{mpesaPaymentDetails.paybill || "Not configured"}</strong>{" "}
+            &rarr; Account:{" "}
+            <strong className="text-bone font-mono">{mpesaPaymentDetails.account || "Not configured"}</strong>
           </p>
           <p className="text-bone-muted">
-            2. Verify name reads: <strong className="text-emerald-400 font-mono">vervenexus</strong>{" "}
+            2. Verify name reads: <strong className="text-emerald-400 font-mono">{mpesaPaymentDetails.accountName || "Not configured"}</strong>{" "}
             &rarr; Amount:{" "}
             <strong className="text-amber-400 font-mono">KES {totalKes.toLocaleString()}</strong>
           </p>
@@ -311,9 +339,8 @@ export const PaymentStatusCard: React.FC<PaymentStatusCardProps> = ({
           <div className="pt-1.5 border-t border-amber-500/20 text-amber-300/90 flex items-start gap-1.5">
             <Clock3 className="size-3.5 text-amber-400 shrink-0 mt-0.5" />
             <span>
-              <strong>Processing Window: Within 24 hours.</strong> Because tickets are verified
-              manually by the admin against our official merchant statement, ticket approval &amp;
-              email delivery is completed within 24 hours of submission.
+              A submitted M-Pesa message is not proof of payment. The organizer must verify the
+              transaction before tickets are issued.
             </span>
           </div>
         </div>
@@ -340,7 +367,7 @@ export const PaymentStatusCard: React.FC<PaymentStatusCardProps> = ({
             id="mpesa-msg-input"
             rows={3}
             className="bg-background border-border text-bone font-mono text-sm placeholder:text-muted-foreground focus:border-amber-400"
-            placeholder="e.g. TLK99XW82A or paste full SMS: TLK99XW82A Confirmed. Ksh1,000 sent to vervenexus on 31/10/26..."
+            placeholder="Paste the M-Pesa confirmation SMS or transaction code"
             value={rawMpesaInput}
             onChange={(e) => {
               setRawMpesaInput(e.target.value);
@@ -377,7 +404,7 @@ export const PaymentStatusCard: React.FC<PaymentStatusCardProps> = ({
               type="submit"
               variant="event"
               size="xl"
-              disabled={isSubmittingCode}
+              disabled={isSubmittingCode || !isMpesaPaymentConfigured}
               className="w-full sm:w-auto"
             >
               {isSubmittingCode ? (
@@ -415,7 +442,7 @@ export const PaymentStatusCard: React.FC<PaymentStatusCardProps> = ({
                   variant="outline"
                   className="border-emerald-500/40 text-emerald-300 font-mono text-[10px]"
                 >
-                  Live Cloud Sync
+                  Payment message received
                 </Badge>
               </div>
               <h2 className="text-2xl font-display text-bone">AWAITING ADMIN CONFIRMATION</h2>
@@ -423,13 +450,11 @@ export const PaymentStatusCard: React.FC<PaymentStatusCardProps> = ({
                 <Clock3 className="size-4 text-amber-400 shrink-0 mt-0.5" />
                 <div>
                   <strong className="text-amber-300 uppercase tracking-wider block font-mono text-[11px]">
-                    Expected Processing Time: Within 24 Hours
+                    Awaiting organizer review
                   </strong>
                   <span>
-                    An automated payment acknowledgment has been emailed to you. Our operations team
-                    audits every transaction against our official merchant statement, and your
-                    official cryptographic QR ticket pass will be delivered automatically upon
-                    confirmation.
+                    A submitted M-Pesa message is a payment claim, not confirmation. The organizer
+                    reviews it, and a ticket is issued only after approval.
                   </span>
                 </div>
               </div>
@@ -438,8 +463,8 @@ export const PaymentStatusCard: React.FC<PaymentStatusCardProps> = ({
                 <strong className="text-amber-300 font-mono font-bold">
                   {submittedCode || extractedCode || mpesaReceipt || "SUBMITTED"}
                 </strong>
-                . Your payment record has been committed to the verification ledger and is currently
-                being audited by the event administrator.
+                . This message has been submitted for organizer review; it has not yet been
+                verified.
               </p>
             </div>
           </div>
@@ -447,7 +472,8 @@ export const PaymentStatusCard: React.FC<PaymentStatusCardProps> = ({
           <div className="flex items-center gap-3 border-t border-amber-500/30 pt-4 text-xs text-amber-200/90 font-mono">
             <RefreshCw className="size-4 animate-spin text-amber-400 shrink-0" />
             <span>
-              Listening for real-time ticket approval... This page will update automatically.
+              This page checks for order-status updates periodically. Use the button below to
+              refresh now.
             </span>
           </div>
 
@@ -475,19 +501,19 @@ export const PaymentStatusCard: React.FC<PaymentStatusCardProps> = ({
             </div>
             <div className="space-y-1">
               <div className="inline-block bg-emerald-500/20 px-2.5 py-0.5 text-[11px] font-bold text-emerald-300 border border-emerald-500/40 uppercase tracking-widest font-mono">
-                Payment Verified
+                Organizer Approved
               </div>
-              <h2 className="text-3xl font-display text-bone">PAYMENT CONFIRMED</h2>
-              <p className="text-sm text-emerald-300 font-mono">
-                M-Pesa Receipt:{" "}
-                <strong className="text-bone font-bold">
-                  {mpesaReceipt || submittedCode || "VERIFIED"}
-                </strong>
-              </p>
+              <h2 className="text-3xl font-display text-bone">PAYMENT APPROVED</h2>
+              {(mpesaReceipt || submittedCode) && (
+                <p className="text-sm text-emerald-300 font-mono">
+                  M-Pesa Reference:{" "}
+                  <strong className="text-bone font-bold">{mpesaReceipt || submittedCode}</strong>
+                </p>
+              )}
               <p className="text-sm text-bone-muted pt-1">
-                Your payment of{" "}
-                <strong className="text-bone">KES {totalKes.toLocaleString()}</strong> has been
-                settled and your cryptographically signed tickets have been generated.
+                The organizer approved this payment claim for{" "}
+                <strong className="text-bone">KES {totalKes.toLocaleString()}</strong>. Your
+                tickets have been issued.
               </p>
             </div>
           </div>
@@ -497,9 +523,8 @@ export const PaymentStatusCard: React.FC<PaymentStatusCardProps> = ({
               <ShieldCheck className="size-4" /> Cryptographic Digital Pass Issued
             </div>
             <p>
-              Order <strong className="text-bone font-mono">{orderNumber}</strong> has been
-              permanently written to the guest registry. You can view, save, and present your
-              digital ticket now.
+              Tickets for order <strong className="text-bone font-mono">{orderNumber}</strong> are
+              available to view and save.
             </p>
           </div>
 

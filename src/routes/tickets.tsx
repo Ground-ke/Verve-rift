@@ -17,6 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { VerveBackButton, VervePresenterBadge, VerveLogo } from "@/components/brand/verve-logo";
 import { useAdminAuth } from "@/lib/auth/admin-auth-context";
+import { supabaseClient } from "@/lib/supabase/client";
 import { useFaviconLoading } from "@/lib/dynamic-favicon";
 import { toast } from "sonner";
 
@@ -73,22 +74,30 @@ function TicketsPortalPage() {
 
       setIsLoadingTickets(true);
       try {
-        const token = sessionStorage.getItem("rift_auth_token") || user.token || "";
+        if (!supabaseClient) throw new Error("Account authentication is unavailable.");
+        const {
+          data: { session },
+          error: sessionError,
+        } = await supabaseClient.auth.getSession();
+        if (sessionError) throw sessionError;
+        if (!session?.access_token) {
+          setTickets([]);
+          return;
+        }
         const res = await fetch("/api/user/tickets", {
           headers: {
-            Authorization: `Bearer ${token}`,
-            "X-User-Email": user.email,
+            Authorization: `Bearer ${session.access_token}`,
           },
         });
 
-        if (res.ok) {
-          const data = await res.json();
-          if (data.success && Array.isArray(data.tickets)) {
-            setTickets(data.tickets);
-          }
+        const data = await res.json();
+        if (!res.ok || !data.success || !Array.isArray(data.tickets)) {
+          throw new Error(data.message || "Unable to load your ticket records.");
         }
-      } catch (err) {
-        console.warn("[TicketsPortal] Error fetching tickets:", err);
+        setTickets(data.tickets);
+      } catch (error) {
+        console.error("[TicketsPortal] Error fetching tickets:", error);
+        toast.error(error instanceof Error ? error.message : "Unable to load your ticket records.");
       } finally {
         setIsLoadingTickets(false);
         setHasFetched(true);
@@ -98,10 +107,10 @@ function TicketsPortalPage() {
     if (!authLoading) {
       loadUserTickets();
     }
-  }, [user?.email, user?.token, authLoading]);
+  }, [user?.email, authLoading]);
 
   const handleGoogleSignIn = async () => {
-    const res = await signInWithGoogle();
+    const res = await signInWithGoogle("/tickets");
     if (res.success) {
       toast.success("Signed in successfully. Retrieving your event passes...");
     } else {

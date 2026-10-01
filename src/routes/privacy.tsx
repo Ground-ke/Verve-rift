@@ -1,13 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import {
-  ShieldCheck,
-  ArrowLeft,
-  Mail,
-  Lock,
-  FileText,
-  CheckCircle2,
-  AlertTriangle,
-} from "lucide-react";
+import { Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { VerveLogo, VerveIcon, VerveBackButton } from "@/components/brand/verve-logo";
 
@@ -18,13 +10,12 @@ export const Route = createFileRoute("/privacy")({
       {
         name: "description",
         content:
-          "Official Privacy Policy for Hauntings of the Rift (Nakuru). Compliant with the Kenya Data Protection Act, 2019 (ODPC) and international data privacy standards.",
+          "Information about personal data used for Hauntings of the Rift ticketing and event access.",
       },
       { property: "og:title", content: "Privacy Policy — Hauntings of the Rift" },
       {
         property: "og:description",
-        content:
-          "How Verve & Co. collects, processes, and protects your personal data and M-Pesa transaction details.",
+        content: "Contact the organizer with questions about personal data and event ticketing.",
       },
       { property: "og:type", content: "website" },
     ],
@@ -58,16 +49,14 @@ function PrivacyPolicyPage() {
       <section className="px-4 py-12 sm:py-16 border-b border-border/60 bg-gradient-to-b from-card/80 to-background/40">
         <div className="mx-auto max-w-4xl space-y-4">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-emerald-500/40 bg-emerald-950/40 text-emerald-300 text-xs font-mono">
-            <ShieldCheck className="size-3.5" />
-            Kenya Data Protection Act, 2019 Compliant (ODPC)
+            Privacy Information
           </div>
           <h1 className="font-display text-3xl sm:text-5xl text-bone tracking-tight">
             Privacy Policy &amp; Data Protection
           </h1>
           <p className="text-sm sm:text-base text-bone-muted max-w-2xl leading-relaxed">
-            Verve &amp; Co. is committed to transparent, lawful, and secure handling of your
-            personal and financial data for <strong>Hauntings of the Rift</strong> (31 October 2026
-            at The Lawns Restaurant, Nakuru).
+            This page describes information used for <strong>Hauntings of the Rift</strong> ticket
+            requests and event access (31 October 2026 at The Lawns Restaurant, Nakuru).
           </p>
           <div className="text-xs font-mono text-muted-foreground pt-1">
             Last Updated: {lastUpdated} · Effective: 2026 Event Cycle
@@ -84,16 +73,13 @@ function PrivacyPolicyPage() {
             Data Controller &amp; Scope
           </h2>
           <p>
-            This Privacy Policy governs the collection, storage, and processing of personal data by{" "}
-            <strong>Verve &amp; Co.</strong> (&ldquo;we&rdquo;, &ldquo;us&rdquo;, or
-            &ldquo;our&rdquo;) in connection with ticket sales, admission verification, and
-            communications for the event <em>Hauntings of the Rift</em>.
+            Ticket requests may include a buyer&apos;s name, phone number, and optional email
+            address. If you submit an M-Pesa confirmation, its message or transaction reference is
+            associated with the order for organizer review.
           </p>
           <p>
-            We process all personal data strictly in compliance with the{" "}
-            <strong>Kenya Data Protection Act, 2019</strong> (enforced by the Office of the Data
-            Protection Commissioner - ODPC) and internationally recognized fair information
-            principles.
+            Ticket and payment information is used to manage the order, review a submitted payment
+            claim, issue a ticket after approval, and respond to support requests.
           </p>
         </section>
 
@@ -104,8 +90,7 @@ function PrivacyPolicyPage() {
             Personal Data We Collect
           </h2>
           <p>
-            We collect only the minimum information necessary to execute the ticketing contract and
-            ensure gate security:
+            Information submitted through ticketing may include:
           </p>
 
           <div className="grid gap-3 sm:grid-cols-2">
@@ -114,8 +99,7 @@ function PrivacyPolicyPage() {
                 A. Attendee Identity &amp; Contact
               </h3>
               <p className="text-xs text-muted-foreground">
-                Full legal name (or ticket holder name), email address, and mobile phone number
-                (Kenya MSISDN format).
+                Buyer name, phone number, and optional email address.
               </p>
             </div>
 
@@ -124,8 +108,8 @@ function PrivacyPolicyPage() {
                 B. M-Pesa Transaction Records
               </h3>
               <p className="text-xs text-muted-foreground">
-                Safaricom M-Pesa 10-character transaction reference code, payment amount in KES, and
-                receipt timestamps. We <strong>never</strong> ask for or store your M-Pesa PIN.
+                The M-Pesa confirmation message or transaction reference you choose to submit for
+                organizer review. Do not submit your M-Pesa PIN or account password.
               </p>
             </div>
 
@@ -134,8 +118,7 @@ function PrivacyPolicyPage() {
                 C. Digital Admission Credentials
               </h3>
               <p className="text-xs text-muted-foreground">
-                Cryptographic ticket hash, barcode identifiers, gate scanner check-in timestamps,
-                and station admission logs.
+                Ticket code and related ticket status, including check-in information if recorded.
               </p>
             </div>
 
@@ -144,8 +127,8 @@ function PrivacyPolicyPage() {
                 D. Technical &amp; Device Telemetry
               </h3>
               <p className="text-xs text-muted-foreground">
-                Ephemeral session IDs, device type (mobile/desktop), and anonymized page analytics
-                to optimize checkout speeds.
+                Technical information needed to operate the website and checkout may also be
+                processed by the site.
               </p>
             </div>
           </div>
@@ -158,29 +141,24 @@ function PrivacyPolicyPage() {
             Purpose &amp; Legal Basis of Processing
           </h2>
           <p>
-            Under Section 30 of the Kenya Data Protection Act, our legal bases for processing
-            include:
+            Ticket and order information is used for these event-related purposes:
           </p>
           <ul className="space-y-2 list-disc list-inside text-xs sm:text-sm text-bone-muted pl-2">
             <li>
-              <strong className="text-bone">Contractual Performance:</strong> To verify your
-              Safaricom payment, mint your official passes, and deliver your digital QR tickets via
-              email.
+              <strong className="text-bone">Order handling:</strong> To create and manage your
+              ticket request and contact you about it.
             </li>
             <li>
-              <strong className="text-bone">Legitimate Security Interests:</strong> To operate our
-              optical scanners at The Lawns Restaurant, prevent duplicate or counterfeit entries,
-              and safeguard event capacity.
+              <strong className="text-bone">Payment review:</strong> To let the organizer review a
+              submitted M-Pesa message before approving an order.
             </li>
             <li>
-              <strong className="text-bone">Statutory Compliance:</strong> To maintain auditable
-              financial ledgers of ticket transactions in accordance with Kenya Revenue Authority
-              (KRA) and commercial law.
+              <strong className="text-bone">Ticket delivery and access:</strong> To issue and
+              validate tickets after an order is approved.
             </li>
             <li>
-              <strong className="text-bone">Explicit Consent:</strong> Where you opt-in to the{" "}
-              <em>Rift Dispatch List</em> to receive artist lineup announcements and future event
-              announcements. You may unsubscribe at any time.
+              <strong className="text-bone">Support:</strong> To respond to questions or corrections
+              about an order.
             </li>
           </ul>
         </section>
@@ -191,24 +169,9 @@ function PrivacyPolicyPage() {
             <span className="text-sm font-mono text-muted-foreground">04.</span>
             Cookies &amp; Local Storage Technology
           </h2>
-          <p>Our web application uses essential browser storage to ensure smooth functioning:</p>
-          <div className="bg-background/80 border border-border p-4 font-mono text-xs space-y-2">
-            <div>
-              <span className="text-amber-400 font-bold">rift_data_cookie_consent_v1</span>: Stores
-              your consent choice for cookies and data policies.
-            </div>
-            <div>
-              <span className="text-amber-400 font-bold">ticket_order_cache</span>: Temporarily
-              preserves selected ticket quantities during multi-step checkout.
-            </div>
-            <div>
-              <span className="text-amber-400 font-bold">admin_auth_state</span>: Secure session
-              token for authorized event gatekeepers and staff.
-            </div>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            We do <strong>not</strong> use third-party advertising cookies or cross-site tracking
-            pixels that sell your data to marketing brokers.
+          <p>
+            The website may use browser storage for site functionality, checkout continuity, and
+            authenticated sessions. Browser settings can affect this storage.
           </p>
         </section>
 
@@ -219,23 +182,10 @@ function PrivacyPolicyPage() {
             Third-Party Service Providers
           </h2>
           <p>
-            We do not sell, rent, or trade your personal data. We disclose data solely to trusted
-            infrastructure partners strictly necessary for event operations:
+            Website hosting, authentication, email, and other configured service providers may
+            process information as needed to operate ticketing. Contact the organizer for the
+            current provider and data-sharing details.
           </p>
-          <ul className="space-y-1.5 list-disc list-inside text-xs sm:text-sm text-bone-muted pl-2">
-            <li>
-              <strong>Safaricom PLC:</strong> Facilitation and verification of direct M-Pesa
-              payments (Paybill 522533).
-            </li>
-            <li>
-              <strong>Google Cloud &amp; Firebase:</strong> High-security encrypted cloud storage
-              and database hosting.
-            </li>
-            <li>
-              <strong>Google Workspace / Gmail:</strong> Transactional dispatch of digital passes
-              and customer service correspondence.
-            </li>
-          </ul>
         </section>
 
         {/* Section 6: Data Retention & Security */}
@@ -245,10 +195,9 @@ function PrivacyPolicyPage() {
             Security Measures &amp; Data Retention
           </h2>
           <p>
-            All network communication occurs over TLS 1.3 encryption. Pass cryptographic digests are
-            sealed with server-side HMAC signatures. Personal contact details are retained only as
-            long as necessary to fulfill event reconciliation and statutory tax record-keeping
-            requirements, after which records are securely purged or anonymized.
+            A verified retention schedule and detailed security-control description are not
+            published here. Contact the organizer for information about retention, access, or a
+            request to correct or remove personal information.
           </p>
         </section>
 
@@ -259,33 +208,33 @@ function PrivacyPolicyPage() {
             Your Rights Under Kenyan Law
           </h2>
           <p>
-            Under Sections 26–40 of the Kenya Data Protection Act, 2019, you have the following
-            enforceable rights:
+            Contact the organizer to request access to, correction of, or deletion of information
+            associated with your ticket request, subject to any applicable record-keeping
+            requirements.
           </p>
 
           <div className="grid gap-2 sm:grid-cols-2 text-xs">
             <div className="border border-border/80 bg-card/40 p-3">
-              <span className="font-mono text-amber-300 font-bold block mb-1">Right to Access</span>
-              Request a complete copy of the personal details we hold about you.
+              <span className="font-mono text-amber-300 font-bold block mb-1">Access</span>
+              Ask what information is associated with your ticket request.
             </div>
             <div className="border border-border/80 bg-card/40 p-3">
               <span className="font-mono text-amber-300 font-bold block mb-1">
-                Right to Rectification
+                Correction
               </span>
-              Correct inaccurate or misspelled attendee names or contact information.
+              Ask to correct inaccurate contact or ticket information.
             </div>
             <div className="border border-border/80 bg-card/40 p-3">
               <span className="font-mono text-amber-300 font-bold block mb-1">
-                Right to Erasure
+                Deletion
               </span>
-              Request the deletion of your personal data where retention is no longer necessary.
+              Ask for information to be removed, subject to applicable retention requirements.
             </div>
             <div className="border border-border/80 bg-card/40 p-3">
               <span className="font-mono text-amber-300 font-bold block mb-1">
-                Right to Lodge a Complaint
+                Other privacy questions
               </span>
-              File an inquiry directly with the Office of the Data Protection Commissioner (ODPC
-              Kenya).
+              Contact the organizer for details about the applicable process.
             </div>
           </div>
         </section>
@@ -297,8 +246,7 @@ function PrivacyPolicyPage() {
             <h2 className="font-display text-xl text-bone">Contact &amp; Data Inquiries</h2>
           </div>
           <p className="text-xs sm:text-sm text-bone-muted">
-            To exercise your privacy rights, request data deletion, or report a security concern,
-            contact our designated event operations team:
+            For questions or requests about personal information, contact the event organizer.
           </p>
           <div className="font-mono text-xs space-y-1 text-bone">
             <div>
@@ -311,8 +259,7 @@ function PrivacyPolicyPage() {
               </a>
             </div>
             <div>
-              <strong>Location:</strong> The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova
-              Woodlands, Nakuru, Kenya
+              <strong>Location:</strong> The Lawns Restaurant, Nakuru, Kenya
             </div>
           </div>
         </section>
@@ -321,8 +268,7 @@ function PrivacyPolicyPage() {
       {/* Footer */}
       <footer className="border-t border-border/80 bg-card/40 px-4 py-8 text-center text-xs font-mono text-muted-foreground">
         <p>
-          &copy; 2026 Verve &amp; Co. All rights reserved. Hauntings of the Rift is a registered
-          event experience.
+          &copy; 2026 Verve &amp; Co. All rights reserved.
         </p>
         <div className="flex justify-center gap-4 mt-2 text-lavender">
           <Link to="/" className="hover:text-bone underline">

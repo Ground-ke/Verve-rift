@@ -18,8 +18,7 @@ export const DEFAULT_EVENT: EventRecord = {
   slug: "hauntings-of-the-rift-2026",
   name: "Hauntings of the Rift",
   tagline: "Presented by Verve & Co.",
-  description:
-    "A premier Halloween nightlife experience in Nakuru. High-energy electronic atmosphere, curated music, and immersive soundscapes.",
+  description: "Hauntings of the Rift, presented by Serve & Co.",
   venue_name: "The Lawns Restaurant",
   venue_address: "Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru",
   venue_directions: "Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru",
@@ -41,8 +40,7 @@ export const DEFAULT_TICKET_TYPES: TicketTypeRecord[] = [
     event_id: "00000000-0000-0000-0000-000000000001",
     slug: "early-bird",
     name: "Early Bird",
-    description:
-      "General admission for one guest. Access to all stages, main floor, and themed experiences.",
+    description: "Single entry",
     admits_count: 1,
     price_kes: 1000,
     total_inventory: null, // NOT INVENTED
@@ -62,8 +60,7 @@ export const DEFAULT_TICKET_TYPES: TicketTypeRecord[] = [
     event_id: "00000000-0000-0000-0000-000000000001",
     slug: "couple-pass",
     name: "Couple Pass",
-    description:
-      "Dual admission pass admitting two guests on a single entry token. Ideal for duos and partners.",
+    description: "Entry for two",
     admits_count: 2,
     price_kes: 1800,
     total_inventory: null, // NOT INVENTED
@@ -83,10 +80,9 @@ export const DEFAULT_TICKET_TYPES: TicketTypeRecord[] = [
     event_id: "00000000-0000-0000-0000-000000000001",
     slug: "group-of-four",
     name: "Group of Four",
-    description:
-      "Squad bundle admitting four guests. Fast-track entry together with dedicated group wristbands.",
+    description: "Entry for four",
     admits_count: 4,
-    price_kes: 3200,
+    price_kes: 3600,
     total_inventory: null, // NOT INVENTED
     reserved_count: 0,
     sold_count: 0,

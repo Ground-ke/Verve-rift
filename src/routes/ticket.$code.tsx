@@ -64,16 +64,6 @@ function TicketCodeRouteComponent() {
     loadTicket();
   }, [code]);
 
-  const handleStatusChange = (newStatus: "valid" | "used") => {
-    if (ticket) {
-      setTicket({
-        ...ticket,
-        status: newStatus,
-        usedAt: newStatus === "used" ? new Date().toISOString() : ticket.usedAt,
-      });
-    }
-  };
-
   if (loading) {
     return (
       <div className="min-h-screen bg-background px-4 py-20 flex items-center justify-center">
@@ -137,11 +127,7 @@ function TicketCodeRouteComponent() {
         </div>
 
         {/* Digital Ticket Card */}
-        <DigitalTicket
-          ticket={ticket}
-          showAdminActions={true}
-          onStatusChange={handleStatusChange}
-        />
+        <DigitalTicket ticket={ticket} />
 
         {/* Recovery Link Note */}
         <div className="mt-8 text-center border-t border-bone/10 pt-6">

@@ -1,5 +1,4 @@
 import { OrderService } from "./order-service";
-import { MpesaService, DarajaCallbackPayload } from "./mpesa-service";
 import { TicketsServerService } from "./tickets.server";
 import { AdminServerService } from "./admin-service";
 import { RefundService } from "./refund-service";
@@ -27,46 +26,20 @@ import {
 } from "../lib/validation/api-schemas";
 import { sanitizeObject } from "../lib/validation/sanitizer";
 import { isCloudSqlConfigured } from "../db/index.ts";
+import {
+  authorizeStaffApiRequest,
+  getAuthenticatedApiUser,
+  readBearerToken,
+  requiredApiRoles,
+} from "./api-auth";
 
 export async function handleApiRequest(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const pathname = url.pathname;
   const method = request.method.toUpperCase();
 
-  const originHeader = request.headers.get("origin");
-  const hostHeader = request.headers.get("host") || "";
-
-  const isAllowedOrigin = (origin: string | null): boolean => {
-    if (!origin) return true;
-    try {
-      const parsed = new URL(origin);
-      if (parsed.host === hostHeader) return true;
-      if (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1") return true;
-      if (parsed.hostname.endsWith(".run.app")) return true;
-      if (
-        parsed.hostname === "hauntingsoftherift.co.ke" ||
-        parsed.hostname.endsWith(".hauntingsoftherift.co.ke")
-      )
-        return true;
-      if (parsed.hostname === "verve-hauntings.vercel.app") return true;
-      return false;
-    } catch {
-      return false;
-    }
-  };
-
-  const allowedOrigin = originHeader && isAllowedOrigin(originHeader) ? originHeader : "";
-
-  // Helper for JSON responses with defensive security headers and strict origin-bound CORS
-  const json = (data: unknown, status = 200, extraHeaders?: Record<string, string>) => {
-    const corsHeaders: Record<string, string> = allowedOrigin
-      ? {
-          "Access-Control-Allow-Origin": allowedOrigin,
-          Vary: "Origin",
-          "Access-Control-Allow-Credentials": "true",
-        }
-      : {};
-
+  // Helper for JSON responses with defensive security headers and strict CORS
+  const json = (data: unknown, status = 200) => {
     return new Response(JSON.stringify(data), {
       status,
       headers: {
@@ -75,9 +48,6 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         "X-Content-Type-Options": "nosniff",
         "X-Frame-Options": "SAMEORIGIN",
         "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
-        "Referrer-Policy": "no-referrer",
-        ...corsHeaders,
-        ...(extraHeaders || {}),
       },
     });
   };
@@ -94,68 +64,55 @@ export async function handleApiRequest(request: Request): Promise<Response> {
 
   // Handle CORS preflight
   if (method === "OPTIONS") {
-    if (originHeader && !isAllowedOrigin(originHeader)) {
-      return new Response(null, { status: 403 });
-    }
-    return new Response(null, {
-      status: 204,
-      headers: {
-        ...(allowedOrigin ? { "Access-Control-Allow-Origin": allowedOrigin, Vary: "Origin" } : {}),
-        "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers":
-          "Content-Type, Authorization, X-Requested-With, Idempotency-Key, X-Checkout-Token, X-User-Email",
-        "Access-Control-Max-Age": "86400",
-      },
-    });
-  }
-
-  // Reject untrusted cross-origin requests trying to mutate admin or payment data
-  if (originHeader && !isAllowedOrigin(originHeader)) {
-    if (
-      pathname.startsWith("/api/admin/") ||
-      pathname.startsWith("/api/pay/") ||
-      pathname.startsWith("/api/orders/")
-    ) {
-      return errorJson(
-        "Cross-origin access from untrusted origin denied.",
-        "FORBIDDEN_ORIGIN",
-        403,
-      );
-    }
-  }
-
-  // Server-side authorization check for all /api/admin/* endpoints
-  if (pathname.startsWith("/api/admin/")) {
-    const authHeader = request.headers.get("authorization");
-    if (!authHeader || !authHeader.replace(/^Bearer\s+/i, "").trim()) {
-      return errorJson("Authorization token required for admin endpoint.", "UNAUTHORIZED", 401);
-    }
+    return new Response(null, { status: 403 });
   }
 
   try {
+    const requiredRoles = requiredApiRoles(pathname);
+    let apiRequestRole: "admin" | "scanner" | null = null;
+
+    if (requiredRoles) {
+      const authorization = await authorizeStaffApiRequest(request, requiredRoles);
+      if (!authorization.success) {
+        return errorJson(
+          authorization.message,
+          authorization.status === 401
+            ? "UNAUTHORIZED"
+            : authorization.status === 403
+              ? "FORBIDDEN"
+              : "AUTH_UNAVAILABLE",
+          authorization.status,
+        );
+      }
+      apiRequestRole = authorization.identity.role;
+    }
+
+    if (pathname === "/api/user/tickets" && method === "GET") {
+      const token = readBearerToken(request);
+      if (!token) {
+        return errorJson("A valid bearer token is required.", "UNAUTHORIZED", 401);
+      }
+      try {
+        const user = await getAuthenticatedApiUser(token);
+        if (!user) {
+          return errorJson("The access token is invalid or expired.", "UNAUTHORIZED", 401);
+        }
+        const tickets = await TicketsServerService.getTicketsForUser(user.email);
+        return json({ success: true, count: tickets.length, tickets });
+      } catch (error) {
+        console.error("Could not retrieve authenticated user's tickets:", error);
+        return errorJson("Ticket records are temporarily unavailable.", "SERVICE_UNAVAILABLE", 503);
+      }
+    }
+
     // --------------------------------------------------------------------------
     // 1. Health check
     // --------------------------------------------------------------------------
     if (pathname === "/api/health") {
-      const siteUrl =
-        process.env.SITE_URL || process.env.VITE_APP_URL || "https://hauntingsoftherift.co.ke";
       return json({
         status: "ok",
         runtime: process.env.VERCEL ? "vercel" : "node",
         time: new Date().toISOString(),
-        siteUrl,
-        deploymentVerification: {
-          tlsConfigured: siteUrl.startsWith("https://"),
-          nodeEnv: process.env.NODE_ENV || "development",
-          venue: "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru",
-          mpesaCallbackReachability: Boolean(process.env.MPESA_CALLBACK_URL),
-          emailDeliveryReady: Boolean(
-            (process.env.SMTP_USER || process.env.GMAIL_USER) &&
-            (process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD),
-          ),
-          activeTiersCount: OrderService.getTicketTypes().length,
-          persistentStoreActive: true,
-        },
         databases: {
           cloudSqlConfigured: isCloudSqlConfigured(),
           supabaseConfigured: Boolean(
@@ -166,8 +123,10 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           ),
         },
         services: {
-          mpesaConfigured: Boolean(
-            process.env.MPESA_CONSUMER_KEY && process.env.MPESA_CONSUMER_SECRET,
+          manualMpesaConfigured: Boolean(
+            process.env.VITE_MPESA_PAYBILL &&
+            process.env.VITE_MPESA_ACCOUNT &&
+            process.env.VITE_MPESA_ACCOUNT_NAME,
           ),
           gmailSmtpConfigured: Boolean(
             (process.env.SMTP_USER ||
@@ -261,6 +220,13 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         body["token"] || body["checkoutToken"]
           ? String(body["token"] || body["checkoutToken"])
           : undefined;
+      if (!checkoutToken) {
+        return errorJson(
+          "A checkout authorization token is required to submit a payment reference.",
+          "UNAUTHORIZED",
+          401,
+        );
+      }
       const rawInput = String(
         body["mpesa_code"] ||
           body["mpesaCode"] ||
@@ -268,13 +234,6 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           body["mpesaMessage"] ||
           "",
       );
-      const buyerEmail =
-        body["buyer_email"] || body["buyerEmail"]
-          ? String(body["buyer_email"] || body["buyerEmail"])
-              .trim()
-              .toLowerCase()
-          : undefined;
-
       if (!orderId) {
         return errorJson("order_id is required.", "INVALID_INPUT", 400);
       }
@@ -289,16 +248,15 @@ export async function handleApiRequest(request: Request): Promise<Response> {
 
       // Automatically extract 10-character uppercase alphanumeric M-Pesa code from pasted text or code
       const codeRegexMatch = rawInput.match(/\b([A-Z0-9]{10})\b/i);
-      const extractedCode = codeRegexMatch
+      const extractedCode = codeRegexMatch?.[1]
         ? codeRegexMatch[1].toUpperCase()
         : rawInput.trim().toUpperCase();
 
-      const result = OrderService.submitMpesaCode({
+      const result = await OrderService.submitMpesaCode({
         orderId,
         checkoutToken,
         mpesaCode: extractedCode,
         mpesaMessage: rawInput.trim(),
-        buyerEmail,
       });
 
       if (!result.success || !result.order) {
@@ -306,7 +264,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       }
 
       const order = result.order;
-      const targetEmail = (buyerEmail || order.buyerEmail || "").trim().toLowerCase();
+      const targetEmail = (order.buyerEmail || "").trim().toLowerCase();
 
       // 1. Automate receipt & verification pending email to buyer
       let buyerEmailDispatched = false;
@@ -374,7 +332,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         return errorJson("Authorization token required for order lookup.", "UNAUTHORIZED", 401);
       }
 
-      const order = OrderService.getOrder(orderId, token);
+      const order = await OrderService.getOrder(orderId, token);
       if (!order) {
         return errorJson("Order not found or authorization token invalid.", "UNAUTHORIZED", 401);
       }
@@ -400,7 +358,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         return errorJson("order_id and token are required.", "INVALID_INPUT", 400);
       }
 
-      const cancelResult = OrderService.cancelOrder(orderId, token);
+      const cancelResult = await OrderService.cancelOrder(orderId, token);
       if (!cancelResult.success) {
         let status = 400;
         if (cancelResult.code === "UNAUTHORIZED") status = 401;
@@ -413,67 +371,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     }
 
     // --------------------------------------------------------------------------
-    // 5. POST /api/payments/mpesa/stkpush (STK Push Disabled - Message Reading Active)
-    // --------------------------------------------------------------------------
-    if (pathname === "/api/payments/mpesa/stkpush" && method === "POST") {
-      return errorJson(
-        "Daraja STK Push has been retired. Please submit your M-Pesa transaction reference or SMS message to /api/orders/submit-mpesa-code.",
-        "STK_PUSH_RETIRED",
-        410,
-      );
-    }
-
-    // --------------------------------------------------------------------------
-    // 6. POST /api/payments/mpesa/callback (Safaricom Daraja Webhook Handler)
-    // --------------------------------------------------------------------------
-    if (pathname === "/api/payments/mpesa/callback" && method === "POST") {
-      let callbackBody: DarajaCallbackPayload;
-      try {
-        callbackBody = (await request.json()) as DarajaCallbackPayload;
-      } catch {
-        return errorJson("Invalid JSON callback payload.", "INVALID_JSON", 400);
-      }
-
-      const { statusCode, response } = await MpesaService.processCallback(callbackBody);
-      return json(response, statusCode);
-    }
-
-    // --------------------------------------------------------------------------
-    // 7. GET /api/payments/status (Polling Endpoint for Checkout Client)
-    // --------------------------------------------------------------------------
-    if (pathname === "/api/payments/status" && method === "GET") {
-      const orderId = url.searchParams.get("order_id") || url.searchParams.get("orderId");
-      const token =
-        url.searchParams.get("token") ||
-        request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
-
-      if (!orderId || !token) {
-        return errorJson(
-          "order_id and checkout token are required for payment status.",
-          "UNAUTHORIZED",
-          401,
-        );
-      }
-
-      const statusResult = MpesaService.getPaymentStatus(orderId, token);
-      if (!statusResult) {
-        return errorJson("Order not found or authorization token invalid.", "UNAUTHORIZED", 401);
-      }
-
-      // If payment is successful, ensure tickets are issued
-      if (statusResult.paymentStatus === "successful" || statusResult.orderStatus === "paid") {
-        try {
-          await TicketsServerService.issueTicketsForOrder(orderId, token);
-        } catch (e) {
-          console.warn("Could not auto-issue tickets on poll:", e);
-        }
-      }
-
-      return json(statusResult);
-    }
-
-    // --------------------------------------------------------------------------
-    // 8. POST /api/pay/verify (Idempotency Gate for Payment Verification)
+    // 5. POST /api/pay/verify (Idempotency Gate for Verified Orders)
     // --------------------------------------------------------------------------
     if (pathname === "/api/pay/verify" && method === "POST") {
       let body: Record<string, unknown>;
@@ -497,7 +395,6 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         idempotencyKey,
         orderId,
         token,
-        mpesaReceipt,
         clientIp,
       });
 
@@ -512,131 +409,6 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     }
 
     // --------------------------------------------------------------------------
-    // 8b. GET /api/user/orders (Attendee Account Orders)
-    // --------------------------------------------------------------------------
-    if (pathname === "/api/user/orders" && method === "GET") {
-      const email =
-        request.headers.get("x-user-email")?.trim().toLowerCase() ||
-        url.searchParams.get("email")?.trim().toLowerCase();
-      const userId = request.headers.get("x-user-id")?.trim() || undefined;
-
-      if (!email && !userId) {
-        return errorJson(
-          "Authentication required. Please sign in to view your orders.",
-          "UNAUTHORIZED",
-          401,
-        );
-      }
-
-      const orders = OrderService.getOrdersForUser(email || "", userId);
-      return json({
-        success: true,
-        count: orders.length,
-        orders,
-      });
-    }
-
-    // --------------------------------------------------------------------------
-    // 8c. GET /api/user/tickets (Attendee Account Tickets)
-    // --------------------------------------------------------------------------
-    if (pathname === "/api/user/tickets" && method === "GET") {
-      const email =
-        request.headers.get("x-user-email")?.trim().toLowerCase() ||
-        url.searchParams.get("email")?.trim().toLowerCase();
-      const userId = request.headers.get("x-user-id")?.trim() || undefined;
-
-      if (!email && !userId) {
-        return errorJson(
-          "Authentication required. Please sign in to view your tickets.",
-          "UNAUTHORIZED",
-          401,
-        );
-      }
-
-      const tickets = TicketsServerService.getTicketsForUser(email || "", userId);
-      return json({
-        success: true,
-        count: tickets.length,
-        tickets,
-      });
-    }
-
-    // --------------------------------------------------------------------------
-    // 8d. GET /api/user/tickets/:code (Full Ticket Record for Ticket Holder)
-    // --------------------------------------------------------------------------
-    const userTicketMatch = pathname.match(/^\/api\/user\/tickets\/([a-zA-Z0-9_-]+)$/);
-    if (userTicketMatch && method === "GET") {
-      const code = userTicketMatch[1];
-      const email =
-        request.headers.get("x-user-email")?.trim().toLowerCase() ||
-        url.searchParams.get("email")?.trim().toLowerCase();
-      const userId = request.headers.get("x-user-id")?.trim() || undefined;
-
-      const fullResult = TicketsServerService.getTicketByCodeFull(code, email || userId, false);
-      if (!fullResult.success || !fullResult.ticket) {
-        return errorJson(
-          fullResult.message || "Ticket not found or unauthorized.",
-          "UNAUTHORIZED",
-          401,
-        );
-      }
-
-      return json({
-        success: true,
-        ticket: fullResult.ticket,
-      });
-    }
-
-    // --------------------------------------------------------------------------
-    // 8e. POST /api/tickets/claim (Link Guest Orders to Authenticated Account)
-    // --------------------------------------------------------------------------
-    if (pathname === "/api/tickets/claim" && method === "POST") {
-      let body: Record<string, unknown>;
-      try {
-        body = (await request.json()) as Record<string, unknown>;
-      } catch {
-        return errorJson("Invalid JSON request body.", "INVALID_JSON", 400);
-      }
-
-      const email = String(body.email || request.headers.get("x-user-email") || "")
-        .trim()
-        .toLowerCase();
-      const userId = String(body.userId || request.headers.get("x-user-id") || "").trim();
-      const orderId = String(body.orderId || body.order_id || "").trim();
-      const token = String(body.token || body.checkoutToken || "").trim();
-
-      if (!email && !userId) {
-        return errorJson(
-          "Authenticated user email or UID is required to claim tickets.",
-          "UNAUTHORIZED",
-          401,
-        );
-      }
-
-      if (orderId) {
-        const order = OrderService.getOrder(orderId, token || undefined);
-        if (order) {
-          order.userId = userId;
-          order.buyerEmail = email;
-          const userTickets = TicketsServerService.getTicketsForUser(email, userId);
-          return json({
-            success: true,
-            message: "Order and tickets successfully linked to your account.",
-            tickets: userTickets,
-          });
-        }
-      }
-
-      const userTickets = TicketsServerService.getTicketsForUser(email, userId);
-      return json({
-        success: true,
-        message: `Found ${userTickets.length} ticket(s) matching your verified attendee account.`,
-        count: userTickets.length,
-        tickets: userTickets,
-      });
-    }
-
-    // --------------------------------------------------------------------------
     // 9. GET /api/tickets/recover/verify (Verify Recovery Token & List Tickets)
     // --------------------------------------------------------------------------
     if (pathname === "/api/tickets/recover/verify" && method === "GET") {
@@ -645,7 +417,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         return errorJson("Recovery token parameter required.", "TOKEN_REQUIRED", 400);
       }
 
-      const verifyResult = TicketsServerService.verifyRecoveryToken(token);
+      const verifyResult = await TicketsServerService.verifyRecoveryToken(token);
       if (!verifyResult.valid) {
         return json(
           {
@@ -712,7 +484,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     const ticketMatch = pathname.match(/^\/api\/tickets\/([a-zA-Z0-9_-]+)$/);
     if (ticketMatch && method === "GET") {
       const code = ticketMatch[1];
-      const lookupResult = TicketsServerService.getTicketByCode(code);
+      const lookupResult = await TicketsServerService.getTicketByCode(code);
 
       if (!lookupResult.success || !lookupResult.ticket) {
         return errorJson(lookupResult.message || "Ticket not found.", "TICKET_NOT_FOUND", 404);
@@ -730,22 +502,24 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     const ticketPdfMatch = pathname.match(/^\/api\/tickets\/([a-zA-Z0-9_-]+)\/pdf$/);
     if (ticketPdfMatch && method === "GET") {
       const code = ticketPdfMatch[1];
-      const lookupResult = TicketsServerService.getTicketByCode(code);
+      const lookupResult = await TicketsServerService.getTicketByCode(code);
 
       const ticket = lookupResult?.ticket;
+      if (!lookupResult?.success || !ticket) {
+        return errorJson("Ticket not found.", "TICKET_NOT_FOUND", 404);
+      }
       try {
         const pdfBuffer = await generateTicketPdfBuffer({
           ticketCode: code,
-          customerName: ticket?.attendeeName || "Attendee",
-          tierName: ticket?.tierName || "General Admission Pass",
-          admitsCount: ticket?.admitsCount || 1,
-          orderNumber: ticket?.orderNumber || code,
-          totalKes: ticket?.priceKes || 1000,
-          qrHash: ticket?.qrHash,
-          eventDate: ticket?.venue?.date || "Saturday, 31 October 2026",
-          venueName: ticket?.venue?.name || "The Lawns Restaurant, Nakuru",
-          venueAddress:
-            ticket?.venue?.address || "Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru",
+          customerName: ticket.attendeeName,
+          tierName: ticket.tierName,
+          admitsCount: ticket.admitsCount,
+          orderNumber: ticket.orderNumber,
+          totalKes: ticket.priceKes,
+          qrHash: ticket.qrHash,
+          eventDate: ticket.venue.date,
+          venueName: ticket.venue.name,
+          venueAddress: ticket.venue.address,
         });
 
         return new Response(pdfBuffer, {
@@ -769,20 +543,23 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     const ticketImageMatch = pathname.match(/^\/api\/tickets\/([a-zA-Z0-9_-]+)\/image$/);
     if (ticketImageMatch && method === "GET") {
       const code = ticketImageMatch[1];
-      const lookupResult = TicketsServerService.getTicketByCode(code);
+      const lookupResult = await TicketsServerService.getTicketByCode(code);
 
       const ticket = lookupResult?.ticket;
+      if (!lookupResult?.success || !ticket) {
+        return errorJson("Ticket not found.", "TICKET_NOT_FOUND", 404);
+      }
       try {
         const imageBuffer = await generateTicketPassImageBuffer({
           ticketCode: code,
-          customerName: ticket?.attendeeName || "Attendee",
-          tierName: ticket?.tierName || "General Admission Pass",
-          admitsCount: ticket?.admitsCount || 1,
-          orderNumber: ticket?.orderNumber || code,
-          totalKes: ticket?.priceKes || 1000,
-          qrHash: ticket?.qrHash,
-          eventDate: ticket?.venue?.date || "Saturday, 31 October 2026",
-          venueName: ticket?.venue?.name || "The Lawns Restaurant, Nakuru",
+          customerName: ticket.attendeeName,
+          tierName: ticket.tierName,
+          admitsCount: ticket.admitsCount,
+          orderNumber: ticket.orderNumber,
+          totalKes: ticket.priceKes,
+          qrHash: ticket.qrHash,
+          eventDate: ticket.venue.date,
+          venueName: ticket.venue.name,
         });
 
         return new Response(imageBuffer, {
@@ -836,9 +613,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         event_id: body["event_id"] || body["eventId"] || "hauntings-of-the-rift-2026",
         staff_name: body["staff_name"] || body["staffName"] || "Gate Security Staff",
         gate_location:
-          body["gate_location"] ||
-          body["gateLocation"] ||
-          "Main Gate Entrance, The Lawns Restaurant",
+          body["gate_location"] || body["gateLocation"] || "Main Entrance, The Lawns Restaurant",
       });
 
       if (!parseResult.success) {
@@ -996,7 +771,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     // 13. GET /api/admin/overview (Dashboard Metrics & Analytics)
     // --------------------------------------------------------------------------
     if (pathname === "/api/admin/overview" && method === "GET") {
-      const overview = AdminServerService.getOverviewMetrics();
+      const overview = await AdminServerService.getOverviewMetrics();
       return json({ success: true, ...overview });
     }
 
@@ -1008,7 +783,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       const status = url.searchParams.get("status") || undefined;
       const tier = url.searchParams.get("tier") || undefined;
 
-      const tickets = AdminServerService.getTickets({ search, status, tier });
+      const tickets = await AdminServerService.getTickets({ search, status, tier });
       return json({ success: true, count: tickets.length, tickets });
     }
 
@@ -1078,7 +853,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     // 16b. GET /api/admin/orders/pending (Fetch orders awaiting M-Pesa verification)
     // --------------------------------------------------------------------------
     if (pathname === "/api/admin/orders/pending" && method === "GET") {
-      const pendingOrders = OrderService.getPendingOrders();
+      const pendingOrders = await OrderService.getPendingOrders();
       return json({
         success: true,
         count: pendingOrders.length,
@@ -1105,7 +880,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       }
 
       // 1. Approve order state in authoritative service
-      const approveResult = OrderService.approveOrder({
+      const approveResult = await OrderService.approveOrder({
         orderId,
         adminEmail,
       });
@@ -1211,7 +986,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         return errorJson("order_id is required.", "INVALID_INPUT", 400);
       }
 
-      const rejectResult = OrderService.rejectOrder({
+      const rejectResult = await OrderService.rejectOrder({
         orderId,
         reason,
         adminEmail,
@@ -1229,14 +1004,31 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     }
 
     // --------------------------------------------------------------------------
-    // 16e. POST /api/admin/orders/seed-demo (Disabled in Production)
+    // 16e. POST /api/admin/orders/seed-demo (Seed a sample pending approval order)
     // --------------------------------------------------------------------------
-    if (pathname === "/api/admin/orders/seed-demo") {
-      return errorJson(
-        "Demo and simulated endpoints are permanently disabled in production to protect record integrity.",
-        "FORBIDDEN_DEMO",
-        403,
-      );
+    if (pathname === "/api/admin/orders/seed-demo" && method === "POST") {
+      const demoOrder = await OrderService.createOrder({
+        ticketTypeId: "rift-coven",
+        quantity: 1,
+        buyerName: "Faith Chebet",
+        buyerPhone: "0712345678",
+        buyerEmail: "faith.chebet@example.com",
+      });
+
+      if (demoOrder.success) {
+        await OrderService.submitMpesaCode({
+          orderId: demoOrder.orderId,
+          mpesaCode: "TLK99XW82A",
+          mpesaMessage:
+            "TLK99XW82A Confirmed. Ksh 10,000 sent to HALLOWEEN RIFT PARTY on 21/09/2026 at 2:30 PM. New M-PESA balance is Ksh 45,210.",
+        });
+        return json({
+          success: true,
+          message: "Demo pending order created for verification testing.",
+          orderId: demoOrder.orderId,
+        });
+      }
+      return json({ success: false, message: "Failed to create demo order." }, 500);
     }
 
     // --------------------------------------------------------------------------
@@ -1539,8 +1331,11 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           body["directTicketUrl"] ||
           body["direct_ticket_url"],
         venueNameOrLocation:
-          body["venueNameOrLocation"] || body["venue_name"] || "The Lawns Restaurant, Nakuru",
-        gateOpeningTime: body["gateOpeningTime"] || body["gate_opening_time"] || "18:00 EAT",
+          body["venueNameOrLocation"] ||
+          body["venue_name"] ||
+          "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru",
+        gateOpeningTime:
+          body["gateOpeningTime"] || body["gate_opening_time"] || "4:00 PM till late",
         fastPassLink: body["fastPassLink"] || body["fast_pass_link"],
         refundAmountKes:
           body["refundAmountKes"] || body["refund_amount_kes"] || body["refund_amount"],
@@ -1564,6 +1359,9 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       }
 
       const data = parseResult.data;
+      if (apiRequestRole === "scanner" && data.templateType !== "gate_alert") {
+        return errorJson("Scanners may only dispatch gate alerts.", "FORBIDDEN", 403);
+      }
       const dispatchResult = await WhatsAppNotificationService.sendNotification({
         recipientPhone: data.phone,
         template: data.templateType,
@@ -1577,8 +1375,10 @@ export async function handleApiRequest(request: Request): Promise<Response> {
             data.ticketAccessUrl ||
             data.directTicketUrl ||
             "https://hauntingsoftherift.co.ke/ticket/demo",
-          venueNameOrLocation: data.venueNameOrLocation || "The Lawns Restaurant, Nakuru",
-          gateOpeningTime: data.gateOpeningTime || "18:00 EAT",
+          venueNameOrLocation:
+            data.venueNameOrLocation ||
+            "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru",
+          gateOpeningTime: data.gateOpeningTime || "4:00 PM till late",
           fastPassLink:
             data.fastPassLink ||
             data.ticketAccessUrl ||
@@ -1623,8 +1423,8 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         order_id = "HR-2026-CONFIRMED",
         event_date = "Saturday, 31 October 2026",
         ticket_url = "https://hauntingsoftherift.co.ke/ticket/demo",
-        venue_name = "The Lawns Restaurant, Nakuru",
-        gate_opening_time = "18:00 EAT",
+        venue_name = "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru",
+        gate_opening_time = "4:00 PM till late",
         refund_amount = "1,800",
         payment_ref = "REV-MPESA-DEFAULT",
         refund_reason = "Customer cancellation request",
@@ -1671,7 +1471,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     // 28. POST /api/notifications/reminder-24h (Batch 24h Reminder Dispatch)
     // --------------------------------------------------------------------------
     if (pathname === "/api/notifications/reminder-24h" && method === "POST") {
-      const tickets = TicketsServerService.getAllTickets();
+      const tickets = await TicketsServerService.getAllTickets();
       const validTickets = tickets.filter((t) => t.status === "valid");
 
       const dispatched = [];
@@ -1682,8 +1482,8 @@ export async function handleApiRequest(request: Request): Promise<Response> {
             template: "event_reminder_24h",
             params: {
               customerName: t.attendeeName,
-              venueNameOrLocation: t.venueDetails?.name || "The Lawns Restaurant, Nakuru",
-              gateOpeningTime: "18:00 EAT",
+              venueNameOrLocation: t.venue.name,
+              gateOpeningTime: t.venue.time,
               fastPassLink: `https://hauntingsoftherift.co.ke/ticket/${t.ticketNumber}`,
             },
           });
@@ -1697,8 +1497,8 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           await sendEventReminder24hEmail({
             to: t.buyerEmail,
             customerName: t.attendeeName,
-            venueName: t.venueDetails?.name || "The Lawns Restaurant, Nakuru",
-            gateOpeningTime: "18:00 EAT",
+            venueName: t.venue.name,
+            gateOpeningTime: t.venue.time,
             ticketTier: t.tierName,
             ticketUrl: `https://hauntingsoftherift.co.ke/ticket/${t.ticketNumber}`,
           });
@@ -1738,12 +1538,12 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       } else if (template === "event_reminder_24h") {
         html = generateEventReminder24hEmailHtml({
           customer_name: "Mwangi Karanja",
-          venue_name: "The Lawns Restaurant, Nakuru",
-          gate_opening_time: "18:00 EAT",
+          venue_name: "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru",
+          gate_opening_time: "4:00 PM till late",
           ticket_tier: "VIP Rift Access Pass",
           ticket_url: "https://hauntingsoftherift.co.ke/ticket/HR-1049-9941",
         });
-        plaintext = `⏰ *TOMORROW AT THE RIFT* ⏰\n\nHey Mwangi Karanja, the gates open in 24 hours for Hauntings of the Rift!\n\n📍 *Venue:* The Lawns Restaurant, Nakuru\n🚪 *Gate Opens:* 16:00 EAT\n\n👇 *Have your QR code ready at the gate:*\nhttps://hauntingsoftherift.co.ke/ticket/HR-1049-9941\n\nDress code: Halloween costumes encouraged. Strict 18+ verification at entry.`;
+        plaintext = `⏰ *TOMORROW AT THE RIFT* ⏰\n\nHey Mwangi Karanja, the event is tomorrow.\n\n📍 *Venue:* The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru\n🚪 *Event time:* 4:00 PM till late\n\n👇 *Have your QR code ready at the gate:*\nhttps://hauntingsoftherift.co.ke/ticket/HR-1049-9941\n\nEntry is strictly 18+ with valid ID.`;
       } else if (template === "refund_notice") {
         html = generateRefundNoticeEmailHtml({
           customer_name: "Mwangi Karanja",
@@ -1774,8 +1574,8 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     // 30. GET /api/admin/audience (Aggregated Buyers & Subscribers Email List)
     // --------------------------------------------------------------------------
     if (pathname === "/api/admin/audience" && method === "GET") {
-      const buyers = OrderService.getTicketBuyersEmailList();
-      const tickets = TicketsServerService.getAllTickets();
+      const buyers = await OrderService.getTicketBuyersEmailList();
+      const tickets = await TicketsServerService.getAllTickets();
 
       // Aggregate counts
       const totalPurchasers = buyers.length;
@@ -1838,7 +1638,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       }
 
       // Collect target recipients based on filter
-      const allBuyers = OrderService.getTicketBuyersEmailList();
+      const allBuyers = await OrderService.getTicketBuyersEmailList();
       let recipients: string[] = [];
 
       if (targetFilter === "all") {
@@ -1892,10 +1692,15 @@ export async function handleApiRequest(request: Request): Promise<Response> {
 
       // Record in audit log if available
       try {
-        AdminServerService.logActivity({
-          actor: "Lead Organizer",
+        await AdminServerService.recordAuditLog({
+          actorEmail: request.headers.get("x-user-email") || "admin@verve.co.ke",
+          actorRole: "admin",
           action: "DISPATCH_EMAIL_BROADCAST",
-          details: `Sent broadcast "${subject}" to ${successCount} recipient(s). Filter: ${targetFilter}`,
+          targetTable: "email_broadcasts",
+          targetId: subject,
+          metadata: {
+            details: `Sent broadcast "${subject}" to ${successCount} recipient(s). Filter: ${targetFilter}`,
+          },
         });
       } catch {
         // ignore
@@ -1937,7 +1742,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         to: email,
         subject: "Welcome to Verve & Co. — Hauntings of the Rift Updates",
         headline: "You're on the Guest List for Rift Updates",
-        message: `Greetings ${name || "VIP"},\n\nYou have joined the exclusive dispatch list for Hauntings of the Rift (31 October 2026 at The Lawns Restaurant, Nakuru).\n\nYou will be first to receive artist lineup reveals, stage schedules, and priority flash-sale tickets.`,
+        message: `Greetings ${name || "guest"},\n\nYou have subscribed to updates for Hauntings of the Rift on 31 October 2026 at The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru.`,
         ctaText: "Explore Event & Passes",
         ctaUrl: "https://verve-hauntings.vercel.app/checkout",
       });

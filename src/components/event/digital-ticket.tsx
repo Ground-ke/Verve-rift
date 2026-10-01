@@ -42,21 +42,13 @@ export interface DigitalTicketData {
 
 export interface DigitalTicketProps {
   ticket: DigitalTicketData;
-  showAdminActions?: boolean;
-  onStatusChange?: (newStatus: "valid" | "used") => void;
 }
 
-export const DigitalTicket: React.FC<DigitalTicketProps> = ({
-  ticket,
-  showAdminActions = false,
-  onStatusChange,
-}) => {
+export const DigitalTicket: React.FC<DigitalTicketProps> = ({ ticket }) => {
   const [copied, setCopied] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
-  const [isScanning, setIsScanning] = useState(false);
   const ticketRef = useRef<HTMLDivElement>(null);
 
-  const isValid = ticket.status === "valid";
   const isUsed = ticket.status === "used";
 
   const qrPayload = JSON.stringify({
@@ -138,7 +130,7 @@ export const DigitalTicket: React.FC<DigitalTicketProps> = ({
           canvas.width / 2,
           canvas.height - 25,
         );
-        ctx.fillText("31 Oct 2026 • Topcliff Lodge, Nakuru", canvas.width / 2, canvas.height - 10);
+        ctx.fillText("31 Oct 2026 • The Lawns Restaurant, Nakuru", canvas.width / 2, canvas.height - 10);
 
         const a = document.createElement("a");
         a.download = `hauntings-ticket-${ticket.ticketNumber}.png`;
@@ -155,35 +147,15 @@ export const DigitalTicket: React.FC<DigitalTicketProps> = ({
   };
 
   const handleAddToCalendar = () => {
-    const title = encodeURIComponent("Hauntings of the Rift: Halloween Nightlife 2026");
+    const title = encodeURIComponent("Hauntings of the Rift");
     const details = encodeURIComponent(
-      `Verve & Co. Presents Hauntings of the Rift.\nTicket Code: ${ticket.ticketNumber}\nHolder: ${ticket.attendeeName}\nVenue: The Lawns Restaurant, Nakuru.`,
+      `Verve & Co. Presents Hauntings of the Rift.\nTicket Code: ${ticket.ticketNumber}\nHolder: ${ticket.attendeeName}\nVenue: The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru.\nTime: 4 PM till late.`,
     );
     const location = encodeURIComponent(
       "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru, Kenya",
     );
-    // 2026-10-31T13:00:00Z to 2026-11-01T01:00:00Z (4PM to 4AM EAT)
-    const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=20261031T130000Z/20261101T010000Z&details=${details}&location=${location}`;
+    const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=20261031/20261101&details=${details}&location=${location}`;
     window.open(url, "_blank", "noopener,noreferrer");
-  };
-
-  const handleSimulateCheckin = async () => {
-    setIsScanning(true);
-    try {
-      const res = await fetch("/api/tickets/checkin", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: ticket.ticketNumber, staff_name: "Gate Scanner" }),
-      });
-      const data = await res.json();
-      if (data.success && onStatusChange) {
-        onStatusChange("used");
-      }
-    } catch {
-      // noop
-    } finally {
-      setIsScanning(false);
-    }
   };
 
   return (
@@ -377,7 +349,7 @@ export const DigitalTicket: React.FC<DigitalTicketProps> = ({
             className="border-bone/20 text-xs text-bone hover:bg-bone/10"
           >
             <a
-              href="https://maps.google.com/?q=Top+Cliff+Lounge+Nakuru"
+              href="https://maps.google.com/?q=The+Lawns+Restaurant,+Oyster-Shell+Road,+Nakuru"
               target="_blank"
               rel="noopener noreferrer"
             >
@@ -386,26 +358,6 @@ export const DigitalTicket: React.FC<DigitalTicketProps> = ({
           </Button>
         </div>
 
-        {/* Admin Checkin Action (Optional simulation tool) */}
-        {showAdminActions && (
-          <div className="border-t border-dashed border-bone/20 bg-oxblood/10 p-3 text-center">
-            {isValid ? (
-              <Button
-                variant="destructive"
-                size="sm"
-                className="text-xs"
-                onClick={handleSimulateCheckin}
-                disabled={isScanning}
-              >
-                {isScanning ? "Validating..." : "Simulate Gate Check-in (Mark Used)"}
-              </Button>
-            ) : (
-              <span className="text-xs text-amber-300 font-mono">
-                Ticket already redeemed at {ticket.usedAt || "Gate Scan"}
-              </span>
-            )}
-          </div>
-        )}
       </div>
     </div>
   );

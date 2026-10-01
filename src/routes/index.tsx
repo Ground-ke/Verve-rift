@@ -13,11 +13,9 @@ import {
   Volume2,
   Mail,
   CheckCircle2,
-  AlertCircle,
-  RefreshCw,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import heroImage from "@/assets/rift-night.jpg";
 import {
   Accordion,
@@ -33,26 +31,22 @@ import { ShareActions } from "@/components/event/share-actions";
 import { TicketCard, type Ticket } from "@/components/event/ticket-card";
 import { VerveLogo, VerveIcon, VervePresenterBadge } from "@/components/brand/verve-logo";
 import { generateEventJsonLd } from "@/lib/seo/schema-event";
-import {
-  EVENT_DETAILS,
-  ORGANIZER_APPROVED_TIERS,
-  fetchLiveTicketTiers,
-  type TicketCatalogTier,
-} from "@/lib/catalog/ticket-catalog";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Hauntings of the Rift — Verve & Co. at The Lawns, Nakuru" },
+      { title: "Hauntings of the Rift — Verve & Co. in Nakuru" },
       {
         name: "description",
-        content: `Hauntings of the Rift at ${EVENT_DETAILS.fullVenueString}. 31 October 2026 from 4 PM. Presented by Verve & Co. Tickets from KES 1,000.`,
+        content:
+          "Hauntings of the Rift at The Lawns Restaurant, Nakuru. 31 October 2026 from 4 PM. Presented by Serve & Co. Tickets from KES 1,000.",
       },
       { property: "og:title", content: "Hauntings of the Rift — Verve & Co." },
       {
         property: "og:description",
-        content: `The premier Halloween nightlife experience in Nakuru at ${EVENT_DETAILS.venueName}. Presented by Verve & Co. Tickets from KES 1,000.`,
+        content:
+          "The most spooktakular Halloween party in Nakuru. Presented by Verve & Co. Tickets from KES 1,000.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -61,19 +55,23 @@ export const Route = createFileRoute("/")({
   component: Index,
 });
 
+const tickets: Ticket[] = [
+  { name: "Early Bird", price: 1000, people: "Single entry", note: "Limited release pricing" },
+  { name: "Couple", price: 1800, people: "Entry for two", note: "Arrive together" },
+  { name: "Group of Four", price: 3600, people: "Entry for four", note: "Bring the whole crew" },
+];
+
 const nav = [
   ["Experience", "#experience"],
   ["Tickets", "#tickets"],
   ["Venue", "#venue"],
   ["FAQ", "#faq"],
 ];
-
 const heroFacts: Array<[string, LucideIcon]> = [
   ["31 October 2026", Clock3],
-  [`${EVENT_DETAILS.venueName} · Nakuru`, MapPin],
+  ["The Lawns · Nakuru", MapPin],
   ["4 PM — late", Moon],
 ];
-
 const experiences: Array<[string, string, string, LucideIcon]> = [
   ["01", "Atmosphere", "A dark, cinematic setting inspired by the Rift after hours.", Sparkles],
   [
@@ -85,28 +83,21 @@ const experiences: Array<[string, string, string, LucideIcon]> = [
   ["03", "Costumes", "The brief is simple: arrive wickedly fabulous.", Shirt],
   ["04", "Social energy", "Come as a couple or gather a crew of four.", Users],
 ];
-
 const faqs: Array<[string, string]> = [
-  ["Who can attend?", "This is strictly an 18+ event. Original government ID required at entry."],
+  ["Who can attend?", "This is an 18+ event."],
   ["What is the dress code?", "Wickedly Fabulous."],
-  ["Where is the event?", EVENT_DETAILS.fullVenueString],
-  ["What time does it start?", "Doors open at 4:00 PM EAT and the event continues till late."],
+  ["Where is the event?", "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru."],
+  ["What time does it start?", "Doors open at 4 PM and the event continues till late."],
   [
     "How much are tickets?",
-    "Early Bird is KES 1,000 (single entry), Couple Pass is KES 1,800 (entry for two), and Group of Four is KES 3,200 (entry for four).",
+    "Early Bird is KES 1,000, Couple is KES 1,800, and Group of Four is KES 3,600.",
   ],
   [
     "How do I buy a ticket?",
-    "Select your pass on this website, enter your M-Pesa phone number, and approve the payment prompt on your phone.",
+    "Online purchase will be connected when the M-Pesa ticketing backend is ready.",
   ],
-  [
-    "What happens after payment?",
-    "Your digital pass with cryptographic QR code is generated instantly. You can save it to your device or download the PDF pass.",
-  ],
-  [
-    "Can I get a refund?",
-    "Tickets are non-refundable but transferable to another 18+ attendee. Contact verve.n.co.ke@gmail.com for transfer assistance.",
-  ],
+  ["What happens after payment?", "This information will be updated by the organizers."],
+  ["Can I get a refund?", "This information will be updated by the organizers."],
 ];
 
 function Header() {
@@ -295,29 +286,6 @@ function Index() {
   const heroRef = useRef<HTMLElement>(null);
   const [pastHero, setPastHero] = useState(false);
   const [promotions, setPromotions] = useState<PublicPromotion[]>([]);
-
-  // Live ticket catalog synchronization
-  const [ticketTiers, setTicketTiers] = useState<TicketCatalogTier[]>(ORGANIZER_APPROVED_TIERS);
-  const [pricingLoading, setPricingLoading] = useState(true);
-  const [pricingError, setPricingError] = useState<string | null>(null);
-
-  const loadTiers = useCallback(async () => {
-    setPricingLoading(true);
-    setPricingError(null);
-    const res = await fetchLiveTicketTiers();
-    if (res.success && res.tiers.length > 0) {
-      setTicketTiers(res.tiers);
-      setPricingError(null);
-    } else {
-      setPricingError(res.error || "Unable to load live pricing from the organizer catalog.");
-    }
-    setPricingLoading(false);
-  }, []);
-
-  useEffect(() => {
-    loadTiers();
-  }, [loadTiers]);
-
   const eventJsonLd = generateEventJsonLd();
 
   useEffect(() => {
@@ -338,16 +306,6 @@ function Index() {
     if (heroRef.current) observer.observe(heroRef.current);
     return () => observer.disconnect();
   }, []);
-
-  // Map to TicketCard view
-  const displayTickets: Ticket[] = ticketTiers.map((tier) => ({
-    name: tier.name,
-    price: tier.priceKes,
-    people: tier.peopleLabel,
-    note: tier.note,
-    slug: tier.slug,
-  }));
-
   return (
     <div className="bg-background pb-20 text-foreground lg:pb-0">
       <script
@@ -482,52 +440,15 @@ function Index() {
               <h2 className="mt-2 text-5xl text-bone sm:text-6xl">Choose your ticket</h2>
             </div>
             <p className="max-w-sm text-muted-foreground">
-              Direct checkout with M-Pesa. Passes feature cryptographic QR codes for fast-track gate
-              entry.
+              Select a ticket to continue to the frontend checkout preview. Payments are not
+              connected yet.
             </p>
           </div>
-
-          {/* Explicit Error State if Live Pricing fails */}
-          {pricingError && (
-            <div className="mb-6 rounded border border-red-500/40 bg-red-950/20 p-4 text-red-200">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                <div className="flex items-center gap-2.5">
-                  <AlertCircle className="size-5 text-red-400 shrink-0" />
-                  <div>
-                    <h4 className="font-semibold text-sm text-red-300">
-                      Live Pricing Synchronization Notice
-                    </h4>
-                    <p className="text-xs text-red-200/80 mt-0.5">
-                      {pricingError}. Displaying verified baseline pricing catalog.
-                    </p>
-                  </div>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={loadTiers}
-                  className="border-red-500/40 text-red-300 hover:bg-red-900/30 gap-1.5 shrink-0"
-                >
-                  <RefreshCw className="size-3.5" />
-                  Retry Sync
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {pricingLoading && (
-            <div className="mb-4 flex items-center gap-2 text-xs font-mono text-lavender animate-pulse">
-              <RefreshCw className="size-3 animate-spin" />
-              <span>Verifying live tier pricing and capacity...</span>
-            </div>
-          )}
-
           <div className="grid gap-4 lg:grid-cols-3">
-            {displayTickets.map((ticket, i) => (
+            {tickets.map((ticket, i) => (
               <TicketCard key={ticket.name} ticket={ticket} featured={i === 2} />
             ))}
           </div>
-
           {promotions.length > 0 && (
             <div className="mt-8 border border-lavender/40 bg-lavender/10 p-5">
               <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-center">
@@ -587,7 +508,6 @@ function Index() {
         </div>
       </section>
 
-      {/* VENUE SECTION */}
       <section id="venue" className="mx-auto max-w-7xl px-4 py-20 sm:px-6 lg:px-8 lg:py-28">
         <div className="gothic-frame grid overflow-hidden lg:grid-cols-[.9fr_1.1fr]">
           <div className="p-7 sm:p-12">
@@ -595,19 +515,23 @@ function Index() {
             <p className="mt-12 text-xs font-bold uppercase tracking-[.3em] text-lavender">
               The gathering place
             </p>
-            <h2 className="mt-3 text-5xl text-bone">{EVENT_DETAILS.venueName}</h2>
+            <h2 className="mt-3 text-5xl text-bone">The Lawns Restaurant</h2>
             <p className="mt-4 max-w-md text-lg text-muted-foreground">
-              {EVENT_DETAILS.venueAddress}, Nakuru
+              Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru
             </p>
             <Button asChild variant="event" size="xl" className="mt-8">
-              <a href={EVENT_DETAILS.directionsUrl} target="_blank" rel="noreferrer">
+              <a
+                href="https://www.google.com/maps/search/?api=1&query=Top+Cliff+Lodge+Nairobi"
+                target="_blank"
+                rel="noreferrer"
+              >
                 Get directions <ArrowRight />
               </a>
             </Button>
           </div>
           <div className="relative min-h-[380px] w-full overflow-hidden border-t border-border lg:border-l lg:border-t-0 bg-card">
             <iframe
-              src={EVENT_DETAILS.mapEmbedUrl}
+              src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d17142.074061299183!2d36.14178365044336!3d-0.29953316327871576!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x18299230cc8c9a8f%3A0xaee91de6af909e81!2sTop%20Cliff%20Lodge!5e0!3m2!1sen!2ske!4v1790188374041!5m2!1sen!2ske"
               width="100%"
               height="100%"
               className="absolute inset-0 size-full border-0 min-h-[380px]"
@@ -615,13 +539,12 @@ function Index() {
               allowFullScreen
               loading="lazy"
               referrerPolicy="strict-origin-when-cross-origin"
-              title={`${EVENT_DETAILS.venueName} Location Map`}
+              title="Event venue map"
             />
           </div>
         </div>
       </section>
 
-      {/* FAQ SECTION */}
       <section id="faq" className="border-y border-border bg-card/45 px-4 py-20 sm:px-6 lg:py-28">
         <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[.7fr_1.3fr]">
           <div>
@@ -630,8 +553,8 @@ function Index() {
             </p>
             <h2 className="mt-3 text-5xl text-bone">Questions from the crypt.</h2>
             <p className="mt-4 text-sm text-bone-muted leading-relaxed">
-              Everything you need to know about passes, gate check-in, parking at{" "}
-              {EVENT_DETAILS.venueName}, and costume guidelines.
+              Everything you need to know about passes and the event venue,
+              and costume guidelines.
             </p>
           </div>
 
@@ -653,11 +576,11 @@ function Index() {
             <div className="mt-6 pt-4 border-t border-border/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-muted-foreground font-mono">
               <span>Still have an unlisted question?</span>
               <a
-                href={`mailto:${EVENT_DETAILS.supportEmail}?subject=Question%20about%20Hauntings%20of%20the%20Rift%202026&body=Hello%20Verve%20%26%20Co.%20team,%0D%0A%0D%0AMy%20question%20is:%20`}
+                href="mailto:verve.n.co.ke@gmail.com?subject=Question%20about%20Hauntings%20of%20the%20Rift%202026&body=Hello%20Verve%20%26%20Co.%20team,%0D%0A%0D%0AMy%20question%20is:%20"
                 className="text-amber-400 hover:text-amber-300 flex items-center gap-1.5 font-medium underline-offset-4 hover:underline"
               >
                 <Mail className="size-3.5" />
-                Write to Verve &amp; Co. ({EVENT_DETAILS.supportEmail}) &rarr;
+                Write to Verve &amp; Co. (verve.n.co.ke@gmail.com) &rarr;
               </a>
             </div>
           </div>
@@ -666,7 +589,7 @@ function Index() {
 
       <section className="poster-grain px-4 py-24 text-center sm:px-6 lg:py-36">
         <p className="text-xs font-bold uppercase tracking-[.35em] text-lavender">
-          31 October 2026 · {EVENT_DETAILS.venueName}
+          31 October 2026 · The Lawns, Nakuru
         </p>
         <h2 className="mx-auto mt-4 max-w-5xl text-6xl leading-[.85] text-bone sm:text-8xl">
           Nakuru. Are you ready?

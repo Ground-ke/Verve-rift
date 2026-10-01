@@ -65,7 +65,7 @@ export class RefundService {
     } = params;
 
     // 1. Locate Ticket by ticketNumber or orderId
-    const allTickets = TicketsServerService.getAllTickets();
+    const allTickets = await TicketsServerService.getAllTickets();
     let targetTicket = ticketNumber
       ? allTickets.find((t) => t.ticketNumber === ticketNumber)
       : undefined;
@@ -120,7 +120,7 @@ export class RefundService {
 
     // 4. Update Ticket Status to 'refunded' and invalidate gate pass
     targetTicket.status = "refunded";
-    TicketsServerService.updateTicketRecord(targetTicket);
+    await TicketsServerService.updateTicketRecord(targetTicket);
 
     // 5. Record Authoritative Audit Log
     await AdminServerService.recordAuditLog({
@@ -197,12 +197,12 @@ export class RefundService {
   /**
    * Compute Financial Reconciliation Metrics & Transaction Ledger
    */
-  static getReconciliationData(): {
+  static async getReconciliationData(): Promise<{
     totals: FinancialSummaryTotals;
     ledger: FinancialReconciliationRecord[];
     refunds: RefundRecord[];
-  } {
-    const tickets = TicketsServerService.getAllTickets();
+  }> {
+    const tickets = await TicketsServerService.getAllTickets();
     const refunds = Array.from(refundsStore.values());
 
     const totalTicketsSold = tickets.length;
