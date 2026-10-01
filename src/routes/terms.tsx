@@ -1,7 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import {
-  FileText,
-} from "lucide-react";
+import { FileText } from "lucide-react";
 import { VerveIcon, VerveBackButton } from "@/components/brand/verve-logo";
 
 export const Route = createFileRoute("/terms")({
@@ -11,7 +9,7 @@ export const Route = createFileRoute("/terms")({
       {
         name: "description",
         content:
-          "Ticketing information for Hauntings of the Rift at The Lawns Restaurant, Nakuru (31 October 2026).",
+          "Ticketing information for Hauntings of the Rift at Top Cliff Lodge, Nakuru (31 October 2026).",
       },
       { property: "og:title", content: "Terms & Conditions — Hauntings of the Rift" },
       {
@@ -61,7 +59,7 @@ function TermsPage() {
             Contact the organizer for any policy details not listed here.
           </p>
           <div className="text-xs font-mono text-muted-foreground pt-1">
-            Event Date: Saturday, 31 October 2026 · Venue: The Lawns Restaurant, Nakuru · 18+
+            Event Date: Saturday, 31 October 2026 · Venue: Top Cliff Lodge, Nakuru · 18+
           </div>
         </div>
       </section>
@@ -76,8 +74,8 @@ function TermsPage() {
           </h2>
           <p>
             <em>Hauntings of the Rift</em> takes place on Saturday, 31 October 2026, from 4 PM till
-            late at <strong>The Lawns Restaurant</strong>, Oyster-Shell Rd, opposite Sarova
-            Woodlands, Nakuru, Kenya.
+            late at <strong>Top Cliff Lodge</strong>, Nakuru-Nairobi Highway, Free Area, Nakuru,
+            Kenya.
           </p>
         </section>
 
@@ -101,8 +99,8 @@ function TermsPage() {
           </h2>
           <ul className="space-y-2.5 list-disc list-inside text-xs sm:text-sm text-bone-muted pl-2">
             <li>
-              <strong className="text-bone">Digital tickets:</strong> Keep your ticket available
-              for validation at the event and do not share its QR code.
+              <strong className="text-bone">Digital tickets:</strong> Keep your ticket available for
+              validation at the event and do not share its QR code.
             </li>
             <li>
               <strong className="text-bone">Admits Count:</strong> Each ticket tier admits strictly
@@ -168,10 +166,9 @@ function TermsPage() {
             Venue Information
           </h2>
           <p>
-            The venue is The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru.
-            Contact the organizer for venue access and safety information.
+            The venue is Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru. Contact the
+            organizer for venue access and safety information.
           </p>
-
         </section>
 
         {/* Section 7: Organizer Contact */}

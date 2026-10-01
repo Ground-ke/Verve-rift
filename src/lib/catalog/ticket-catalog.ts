@@ -39,14 +39,13 @@ export const EVENT_DETAILS: EventDetails = {
   time: "4:00 PM till late",
   ageRequirement: "18+",
   dressCode: "Wickedly Fabulous",
-  venueName: "The Lawns Restaurant",
-  venueAddress: "Oyster-Shell Rd, opposite Sarova Woodlands",
+  venueName: "Top Cliff Lodge",
+  venueAddress: "Nakuru-Nairobi Highway, Free Area",
   venueCity: "Nakuru, Kenya",
-  fullVenueString: "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru",
-  directionsUrl:
-    "https://www.google.com/maps/search/?api=1&query=The+Lawns+Restaurant+Oyster-Shell+Rd+opposite+Sarova+Woodlands+Nakuru",
+  fullVenueString: "Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru",
+  directionsUrl: "https://www.google.com/maps/search/?api=1&query=Top+Cliff+Lodge+Nakuru",
   mapEmbedUrl:
-    "https://maps.google.com/maps?q=The+Lawns+Restaurant,+Oyster-Shell+Rd,+Nakuru&t=&z=15&ie=UTF8&iwloc=&output=embed",
+    "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d17142.074061299183!2d36.14178365044336!3d-0.29953316327871576!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x18299230cc8c9a8f%3A0xaee91de6af909e81!2sTop%20Cliff%20Lodge!5e0!3m2!1sen!2ske!4v1790188374041!5m2!1sen!2ske",
   supportEmail: "verve.n.co.ke@gmail.com",
 };
 

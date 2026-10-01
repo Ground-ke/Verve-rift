@@ -1,12 +1,12 @@
 {
-  "projectId": "verve-509008",
-  "appId": "1:185758252762:web:6a0e2c3613d865f5b56fe3",
-  "apiKey": "AIzaSyCajUZ85ZJd2lr4piGt0AKE3tgQ4C-qxjo",
-  "authDomain": "verve-509008.firebaseapp.com",
+  "projectId": "robotic-synapse-43t6m",
+  "appId": "1:1091566340279:web:f27c060d76df7327092532",
+  "apiKey": "AIzaSyClX1zUIfqnFK3VJpSxKCH3vb5uww0QXLo",
+  "authDomain": "robotic-synapse-43t6m.firebaseapp.com",
   "firestoreDatabaseId": "ai-studio-riftsembrace-48b92d68-fb99-42e2-b7e5-f301859f199f",
-  "storageBucket": "verve-509008.firebasestorage.app",
-  "messagingSenderId": "185758252762",
+  "storageBucket": "robotic-synapse-43t6m.firebasestorage.app",
+  "messagingSenderId": "1091566340279",
   "measurementId": "",
-  "oAuthClientId": "185758252762-02l58ba9h04vnsnscgtm5p9002bpjk43.apps.googleusercontent.com",
+  "oAuthClientId": "1091566340279-1uega98bhauhmc2rlk807flnmli5jf34.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }

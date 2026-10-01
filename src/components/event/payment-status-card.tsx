@@ -97,7 +97,9 @@ export const PaymentStatusCard: React.FC<PaymentStatusCardProps> = ({
     setFormError(null);
 
     if (!isMpesaPaymentConfigured) {
-      setFormError("M-Pesa payment details have not been configured. Please contact the organizers.");
+      setFormError(
+        "M-Pesa payment details have not been configured. Please contact the organizers.",
+      );
       return;
     }
 
@@ -209,7 +211,10 @@ export const PaymentStatusCard: React.FC<PaymentStatusCardProps> = ({
         </div>
 
         {!isMpesaPaymentConfigured && (
-          <p role="alert" className="border border-destructive/40 bg-destructive/10 p-3 text-sm text-red-300">
+          <p
+            role="alert"
+            className="border border-destructive/40 bg-destructive/10 p-3 text-sm text-red-300"
+          >
             M-Pesa payment details have not been configured. Do not send money until the organizers
             publish verified payment instructions.
           </p>
@@ -323,12 +328,19 @@ export const PaymentStatusCard: React.FC<PaymentStatusCardProps> = ({
           </div>
           <p className="text-bone-muted">
             1. Open M-Pesa &rarr; Lipa na M-Pesa &rarr; Paybill &rarr; Business:{" "}
-            <strong className="text-amber-300 font-mono">{mpesaPaymentDetails.paybill || "Not configured"}</strong>{" "}
+            <strong className="text-amber-300 font-mono">
+              {mpesaPaymentDetails.paybill || "Not configured"}
+            </strong>{" "}
             &rarr; Account:{" "}
-            <strong className="text-bone font-mono">{mpesaPaymentDetails.account || "Not configured"}</strong>
+            <strong className="text-bone font-mono">
+              {mpesaPaymentDetails.account || "Not configured"}
+            </strong>
           </p>
           <p className="text-bone-muted">
-            2. Verify name reads: <strong className="text-emerald-400 font-mono">{mpesaPaymentDetails.accountName || "Not configured"}</strong>{" "}
+            2. Verify name reads:{" "}
+            <strong className="text-emerald-400 font-mono">
+              {mpesaPaymentDetails.accountName || "Not configured"}
+            </strong>{" "}
             &rarr; Amount:{" "}
             <strong className="text-amber-400 font-mono">KES {totalKes.toLocaleString()}</strong>
           </p>
@@ -512,8 +524,8 @@ export const PaymentStatusCard: React.FC<PaymentStatusCardProps> = ({
               )}
               <p className="text-sm text-bone-muted pt-1">
                 The organizer approved this payment claim for{" "}
-                <strong className="text-bone">KES {totalKes.toLocaleString()}</strong>. Your
-                tickets have been issued.
+                <strong className="text-bone">KES {totalKes.toLocaleString()}</strong>. Your tickets
+                have been issued.
               </p>
             </div>
           </div>

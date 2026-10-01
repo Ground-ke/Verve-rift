@@ -16,17 +16,17 @@ export function generateEventJsonLd(options: EventSchemaOptions = {}) {
     "@type": "Event",
     name: "Hauntings of the Rift — Halloween Nightlife 2026",
     description:
-      "Hauntings of the Rift, presented by Serve & Co., takes place on 31 October 2026 from 4 PM at The Lawns Restaurant in Nakuru.",
+      "Hauntings of the Rift, presented by Serve & Co., takes place on 31 October 2026 from 4 PM at Top Cliff Lodge in Nakuru.",
     image: [posterImage],
     startDate: "2026-10-31T16:00:00+03:00",
     eventStatus: "https://schema.org/EventScheduled",
     eventAttendanceMode: "https://schema.org/OfflineEventAttendanceMode",
     location: {
       "@type": "Place",
-      name: "The Lawns Restaurant",
+      name: "Top Cliff Lodge",
       address: {
         "@type": "PostalAddress",
-        streetAddress: "Oyster-Shell Rd, opposite Sarova Woodlands",
+        streetAddress: "Nakuru-Nairobi Highway, Free Area",
         addressLocality: "Nakuru",
         addressCountry: "KE",
       },

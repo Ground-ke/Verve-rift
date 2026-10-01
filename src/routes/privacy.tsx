@@ -56,7 +56,7 @@ function PrivacyPolicyPage() {
           </h1>
           <p className="text-sm sm:text-base text-bone-muted max-w-2xl leading-relaxed">
             This page describes information used for <strong>Hauntings of the Rift</strong> ticket
-            requests and event access (31 October 2026 at The Lawns Restaurant, Nakuru).
+            requests and event access (31 October 2026 at Top Cliff Lodge, Nakuru).
           </p>
           <div className="text-xs font-mono text-muted-foreground pt-1">
             Last Updated: {lastUpdated} · Effective: 2026 Event Cycle
@@ -89,9 +89,7 @@ function PrivacyPolicyPage() {
             <span className="text-sm font-mono text-muted-foreground">02.</span>
             Personal Data We Collect
           </h2>
-          <p>
-            Information submitted through ticketing may include:
-          </p>
+          <p>Information submitted through ticketing may include:</p>
 
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="border border-border/80 bg-card/60 p-4 space-y-1.5">
@@ -140,9 +138,7 @@ function PrivacyPolicyPage() {
             <span className="text-sm font-mono text-muted-foreground">03.</span>
             Purpose &amp; Legal Basis of Processing
           </h2>
-          <p>
-            Ticket and order information is used for these event-related purposes:
-          </p>
+          <p>Ticket and order information is used for these event-related purposes:</p>
           <ul className="space-y-2 list-disc list-inside text-xs sm:text-sm text-bone-muted pl-2">
             <li>
               <strong className="text-bone">Order handling:</strong> To create and manage your
@@ -219,15 +215,11 @@ function PrivacyPolicyPage() {
               Ask what information is associated with your ticket request.
             </div>
             <div className="border border-border/80 bg-card/40 p-3">
-              <span className="font-mono text-amber-300 font-bold block mb-1">
-                Correction
-              </span>
+              <span className="font-mono text-amber-300 font-bold block mb-1">Correction</span>
               Ask to correct inaccurate contact or ticket information.
             </div>
             <div className="border border-border/80 bg-card/40 p-3">
-              <span className="font-mono text-amber-300 font-bold block mb-1">
-                Deletion
-              </span>
+              <span className="font-mono text-amber-300 font-bold block mb-1">Deletion</span>
               Ask for information to be removed, subject to applicable retention requirements.
             </div>
             <div className="border border-border/80 bg-card/40 p-3">
@@ -259,7 +251,7 @@ function PrivacyPolicyPage() {
               </a>
             </div>
             <div>
-              <strong>Location:</strong> The Lawns Restaurant, Nakuru, Kenya
+              <strong>Location:</strong> Top Cliff Lodge, Nakuru, Kenya
             </div>
           </div>
         </section>
@@ -267,9 +259,7 @@ function PrivacyPolicyPage() {
 
       {/* Footer */}
       <footer className="border-t border-border/80 bg-card/40 px-4 py-8 text-center text-xs font-mono text-muted-foreground">
-        <p>
-          &copy; 2026 Verve &amp; Co. All rights reserved.
-        </p>
+        <p>&copy; 2026 Verve &amp; Co. All rights reserved.</p>
         <div className="flex justify-center gap-4 mt-2 text-lavender">
           <Link to="/" className="hover:text-bone underline">
             Home

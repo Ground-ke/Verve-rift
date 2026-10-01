@@ -167,8 +167,8 @@ function getMasterStaticTemplateSvg(): string {
     <text x="765" y="740" text-anchor="middle" class="serif-title" font-size="36" letter-spacing="3">4-10 PM</text>
     <line x1="650" y1="755" x2="880" y2="755" stroke="#FFFFFF" stroke-opacity="0.8" stroke-width="2" />
 
-    <!-- VENUE: THE LAWNS RESTAURANT, NAKURU -->
-    <text x="500" y="825" text-anchor="middle" class="serif-title" font-size="30" letter-spacing="3">THE LAWNS RESTAURANT</text>
+    <!-- VENUE: TOP CLIFF LODGE, NAKURU -->
+    <text x="500" y="825" text-anchor="middle" class="serif-title" font-size="30" letter-spacing="3">TOP CLIFF LODGE</text>
     <text x="500" y="870" text-anchor="middle" class="serif-title" font-size="34" letter-spacing="6">NAKURU</text>
 
     <!-- TICKET DETAILS STATIC LABELS & BOX -->
@@ -446,7 +446,7 @@ export async function generatePureJsPdfTicket(options: TicketPdfOptions): Promis
     orderNumber = ticketCode,
     admitsCount = 1,
     eventDate = "Saturday, 31 October 2026",
-    venueName = "The Lawns Restaurant, Nakuru",
+    venueName = "Top Cliff Lodge, Nakuru",
   } = options;
 
   const doc = new jsPDF({

@@ -7,6 +7,7 @@ import {
   type AnalyticsSummary,
 } from "@/lib/firebase/analytics-service";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
+import firebaseConfig from "../../../firebase-applet-config.json";
 import {
   Activity,
   Users,
@@ -130,7 +131,7 @@ export function AnalyticsLiveTab() {
           <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0" />
           <div className="font-mono text-xs">
             <span className="text-muted-foreground">Project: </span>
-            <span className="text-bone font-semibold">verve-509008</span>
+            <span className="text-bone font-semibold">{firebaseConfig.projectId}</span>
             <span className="text-muted-foreground mx-2">·</span>
             <span className="text-muted-foreground">Region: </span>
             <span className="text-bone">europe-west2</span>
@@ -140,7 +141,7 @@ export function AnalyticsLiveTab() {
           </div>
         </div>
         <div className="text-[11px] font-mono text-lavender/60">
-          Target: The Lawns Restaurant, Nakuru
+          Target: Top Cliff Lodge, Nakuru
         </div>
       </div>
 

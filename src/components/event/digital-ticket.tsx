@@ -130,7 +130,7 @@ export const DigitalTicket: React.FC<DigitalTicketProps> = ({ ticket }) => {
           canvas.width / 2,
           canvas.height - 25,
         );
-        ctx.fillText("31 Oct 2026 • The Lawns Restaurant, Nakuru", canvas.width / 2, canvas.height - 10);
+        ctx.fillText("31 Oct 2026 • Top Cliff Lodge, Nakuru", canvas.width / 2, canvas.height - 10);
 
         const a = document.createElement("a");
         a.download = `hauntings-ticket-${ticket.ticketNumber}.png`;
@@ -149,10 +149,10 @@ export const DigitalTicket: React.FC<DigitalTicketProps> = ({ ticket }) => {
   const handleAddToCalendar = () => {
     const title = encodeURIComponent("Hauntings of the Rift");
     const details = encodeURIComponent(
-      `Verve & Co. Presents Hauntings of the Rift.\nTicket Code: ${ticket.ticketNumber}\nHolder: ${ticket.attendeeName}\nVenue: The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru.\nTime: 4 PM till late.`,
+      `Verve & Co. Presents Hauntings of the Rift.\nTicket Code: ${ticket.ticketNumber}\nHolder: ${ticket.attendeeName}\nVenue: Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru.\nTime: 4 PM till late.`,
     );
     const location = encodeURIComponent(
-      "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru, Kenya",
+      "Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru, Kenya",
     );
     const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=20261031/20261101&details=${details}&location=${location}`;
     window.open(url, "_blank", "noopener,noreferrer");
@@ -349,7 +349,7 @@ export const DigitalTicket: React.FC<DigitalTicketProps> = ({ ticket }) => {
             className="border-bone/20 text-xs text-bone hover:bg-bone/10"
           >
             <a
-              href="https://maps.google.com/?q=The+Lawns+Restaurant,+Oyster-Shell+Road,+Nakuru"
+              href="https://maps.google.com/?q=Top+Cliff+Lodge,+Nakuru"
               target="_blank"
               rel="noopener noreferrer"
             >
@@ -357,7 +357,6 @@ export const DigitalTicket: React.FC<DigitalTicketProps> = ({ ticket }) => {
             </a>
           </Button>
         </div>
-
       </div>
     </div>
   );

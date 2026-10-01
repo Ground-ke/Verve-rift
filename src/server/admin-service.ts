@@ -149,7 +149,9 @@ export class AdminServerService {
   /**
    * Get Hourly Sales Trend derived from actual issued tickets
    */
-  static async getHourlySalesTrend(): Promise<Array<{ hour: string; sales: number; count: number }>> {
+  static async getHourlySalesTrend(): Promise<
+    Array<{ hour: string; sales: number; count: number }>
+  > {
     const tickets = await TicketsServerService.getAllTickets();
     return this.getHourlySalesTrendFromTickets(tickets);
   }
@@ -192,40 +194,40 @@ export class AdminServerService {
   }): Promise<DigitalTicketRecord[]> {
     return TicketsServerService.getAllTickets().then((storedTickets) => {
       let tickets = storedTickets.filter((t): t is DigitalTicketRecord =>
-      Boolean(
-        t &&
-        typeof t === "object" &&
-        typeof t.ticketNumber === "string" &&
-        t.ticketNumber.trim().length > 0 &&
-        t.attendeeName,
-      ),
+        Boolean(
+          t &&
+          typeof t === "object" &&
+          typeof t.ticketNumber === "string" &&
+          t.ticketNumber.trim().length > 0 &&
+          t.attendeeName,
+        ),
       );
 
-    if (filters?.status && filters.status !== "all") {
-      tickets = tickets.filter((t) => t.status === filters.status);
-    }
+      if (filters?.status && filters.status !== "all") {
+        tickets = tickets.filter((t) => t.status === filters.status);
+      }
 
-    if (filters?.tier && filters.tier !== "all") {
-      tickets = tickets.filter((t) => t.tierSlug === filters.tier);
-    }
+      if (filters?.tier && filters.tier !== "all") {
+        tickets = tickets.filter((t) => t.tierSlug === filters.tier);
+      }
 
-    if (filters?.search) {
-      const q = filters.search.trim().toLowerCase();
-      tickets = tickets.filter(
-        (t) =>
-          (t.ticketNumber?.toLowerCase().includes(q) ?? false) ||
-          (t.attendeeName?.toLowerCase().includes(q) ?? false) ||
-          (t.buyerEmail?.toLowerCase().includes(q) ?? false) ||
-          (t.buyerPhone?.toLowerCase().includes(q) ?? false) ||
-          (t.orderNumber?.toLowerCase().includes(q) ?? false),
-      );
-    }
+      if (filters?.search) {
+        const q = filters.search.trim().toLowerCase();
+        tickets = tickets.filter(
+          (t) =>
+            (t.ticketNumber?.toLowerCase().includes(q) ?? false) ||
+            (t.attendeeName?.toLowerCase().includes(q) ?? false) ||
+            (t.buyerEmail?.toLowerCase().includes(q) ?? false) ||
+            (t.buyerPhone?.toLowerCase().includes(q) ?? false) ||
+            (t.orderNumber?.toLowerCase().includes(q) ?? false),
+        );
+      }
 
-    // Sort newest issued first
+      // Sort newest issued first
       return tickets.sort((a, b) => {
-      const timeB = b.issuedAt ? new Date(b.issuedAt).getTime() : 0;
-      const timeA = a.issuedAt ? new Date(a.issuedAt).getTime() : 0;
-      return timeB - timeA;
+        const timeB = b.issuedAt ? new Date(b.issuedAt).getTime() : 0;
+        const timeA = a.issuedAt ? new Date(a.issuedAt).getTime() : 0;
+        return timeB - timeA;
       });
     });
   }

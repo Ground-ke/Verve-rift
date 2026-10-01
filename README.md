@@ -32,7 +32,7 @@ Event: Hauntings of the Rift
 Presented by: Serve & Co.
 Date: Saturday, October 31, 2026
 Time: 4 PM till late
-Venue: The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru
+Venue: Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru
 Age: 18+
 Dress Code: Wickedly Fabulous
 
@@ -190,7 +190,7 @@ Then clearly display:
 
 31 OCTOBER 2026
 
-THE LAWNS • NAKURU
+TOP CLIFF LODGE • NAKURU
 
 4 PM — LATE
 
@@ -384,9 +384,9 @@ Do not require users to log in to share the event.
 
 Create a clean venue section containing:
 
-The Lawns Restaurant
+Top Cliff Lodge
 
-Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru
+Nakuru-Nairobi Highway, Free Area, Nakuru
 
 Include:
 
@@ -510,7 +510,7 @@ Example:
 
 👻 I'm going to Hauntings of the Rift!
 
-31 October • The Lawns, Nakuru
+31 October • Top Cliff Lodge, Nakuru
 
 Are you coming?
 
@@ -970,7 +970,7 @@ A visitor should immediately understand:
 
 WHAT: Hauntings of the Rift
 WHEN: 31 October 2026
-WHERE: The Lawns, Nakuru
+WHERE: Top Cliff Lodge, Nakuru
 PRICE: From KES 1,000
 ACTION: Buy Tickets
 

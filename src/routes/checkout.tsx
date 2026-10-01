@@ -1497,7 +1497,7 @@ function Checkout() {
             </p>
             <div className="mt-4 space-y-1 text-sm text-muted-foreground border-y border-border/80 py-3">
               <p>31 October 2026 · 4 PM till late</p>
-              <p>The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru</p>
+              <p>Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru</p>
               <p>Age: 18+</p>
             </div>
 

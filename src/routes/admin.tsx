@@ -560,7 +560,7 @@ function AdminDashboardContent() {
                 </span>
               </div>
               <p className="text-[10px] text-muted-foreground font-mono truncate hidden sm:block">
-                The Lawns Restaurant, Nakuru · Official Organizer Console
+                Top Cliff Lodge, Nakuru · Official Organizer Console
               </p>
             </div>
           </div>

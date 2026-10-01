@@ -40,7 +40,7 @@ export function generateBookingConfirmationEmailHtml(params: {
     qr_data_url,
     banner_cid,
     banner_url,
-    venue_name = "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru",
+    venue_name = "Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru",
     calendar_url,
   } = params;
 
@@ -55,7 +55,7 @@ export function generateBookingConfirmationEmailHtml(params: {
     )}&dates=20261031/20261101&details=${encodeURIComponent(
       `Event starts at 4 PM and runs till late.\nTicket reference: ${order_id}\nGuest: ${customer_name}\nTier: ${ticket_tier} (x${quantity})\nTotal: KES ${total_amount}\nVenue: ${venue_name}\nAge requirement: 18+.`,
     )}&location=${encodeURIComponent(
-      "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru, Kenya",
+      "Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru, Kenya",
     )}`;
 
   // Banner image source (CID for offline/embedded, fallback to hosted or static URL)
@@ -203,7 +203,7 @@ export function generateBookingConfirmationEmailHtml(params: {
                 Sent by Verve &amp; Co. &bull; Please do not reply to this automated message.
               </p>
               <p style="margin: 0; font-size: 10px; color: #4b5563;">
-                The Lawns Restaurant, Nakuru &bull; 18+
+                Top Cliff Lodge, Nakuru &bull; 18+
               </p>
             </td>
           </tr>
@@ -425,7 +425,7 @@ export function generateMpesaReceivedEmailHtml(params: {
     total_amount,
     order_url = "https://verve-hauntings.vercel.app",
     event_date = "Saturday, 31 October 2026",
-    venue_name = "The Lawns Restaurant, Oyster-Shell Rd, opposite Sarova Woodlands, Nakuru",
+    venue_name = "Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru",
   } = params;
 
   return `<!DOCTYPE html>
@@ -542,7 +542,7 @@ export function generateMpesaReceivedEmailHtml(params: {
                 Questions or corrections? Reply directly to this email or write to <a href="mailto:verve.n.co.ke@gmail.com" style="color: #C9A84C; text-decoration: none;">verve.n.co.ke@gmail.com</a>.
               </p>
               <p style="margin: 0; font-size: 10px; color: #5B5466;">
-                Hauntings of the Rift • The Lawns Restaurant, Nakuru
+                Hauntings of the Rift • Top Cliff Lodge, Nakuru
               </p>
             </td>
           </tr>
