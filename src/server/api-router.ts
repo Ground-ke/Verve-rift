@@ -291,22 +291,25 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       let buyerEmailStatus = "not_requested";
       if (targetEmail) {
         try {
-          const emailResult = await NotificationOutbox.enqueueAndDispatch({
-            channel: "email",
-            type: "mpesa_ack",
-            recipient: targetEmail,
-            payload: {
-              to: targetEmail,
-              customerName: order.buyerName || "Valued Attendee",
-              orderNumber: order.orderNumber,
-              mpesaCode: extractedCode,
-              ticketTier: order.ticketName,
-              quantity: order.quantity,
-              totalKes: order.totalKes,
-              orderId: order.id,
-              checkoutToken: order.checkoutToken,
+          const emailResult = await NotificationOutbox.enqueueAndDispatch(
+            {
+              channel: "email",
+              type: "mpesa_ack",
+              recipient: targetEmail,
+              payload: {
+                to: targetEmail,
+                customerName: order.buyerName || "Valued Attendee",
+                orderNumber: order.orderNumber,
+                mpesaCode: extractedCode,
+                ticketTier: order.ticketName,
+                quantity: order.quantity,
+                totalKes: order.totalKes,
+                orderId: order.id,
+                checkoutToken: order.checkoutToken,
+              },
             },
-          }, `mpesa-ack:${order.id}:${extractedCode}`);
+            `mpesa-ack:${order.id}:${extractedCode}`,
+          );
           buyerEmailStatus = emailResult.status;
           if (emailResult.status !== "accepted") {
             console.error(
@@ -323,26 +326,27 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       let organizerEmailStatus = "enqueue_failed";
       try {
         const organizerEmail =
-          process.env["ORGANIZER_EMAIL"] ||
-          process.env["SMTP_USER"] ||
-          "verve.n.co.ke@gmail.com";
-        const organizerResult = await NotificationOutbox.enqueueAndDispatch({
-          channel: "email",
-          type: "organizer_mpesa",
-          recipient: organizerEmail,
-          payload: {
-            orderNumber: order.orderNumber,
-            orderId: order.id,
-            mpesaCode: extractedCode,
-            customerName: order.buyerName || "Attendee",
-            customerEmail: targetEmail || "Not provided",
-            customerPhone: order.buyerPhone || "Not provided",
-            ticketTier: order.ticketName,
-            quantity: order.quantity,
-            totalKes: order.totalKes,
-            rawMessage: rawInput.trim(),
+          process.env["ORGANIZER_EMAIL"] || process.env["SMTP_USER"] || "verve.n.co.ke@gmail.com";
+        const organizerResult = await NotificationOutbox.enqueueAndDispatch(
+          {
+            channel: "email",
+            type: "organizer_mpesa",
+            recipient: organizerEmail,
+            payload: {
+              orderNumber: order.orderNumber,
+              orderId: order.id,
+              mpesaCode: extractedCode,
+              customerName: order.buyerName || "Attendee",
+              customerEmail: targetEmail || "Not provided",
+              customerPhone: order.buyerPhone || "Not provided",
+              ticketTier: order.ticketName,
+              quantity: order.quantity,
+              totalKes: order.totalKes,
+              rawMessage: rawInput.trim(),
+            },
           },
-        }, `organizer-mpesa:${order.id}:${extractedCode}`);
+          `organizer-mpesa:${order.id}:${extractedCode}`,
+        );
         organizerEmailStatus = organizerResult.status;
         if (organizerResult.status !== "accepted") {
           console.error(
