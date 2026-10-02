@@ -1058,6 +1058,10 @@ The final experience should make someone in Nakuru see the website and immediate
 
 This project was built with [Lovable](https://lovable.dev).
 
+## Payment operations and deployment
+
+The P1 operational handoff covers manual payment evidence, notification outbox operations, backups, restore drills, and current limitations: [Payment operations handoff](docs/p1-payment-operations.md). Refund recording remains disabled until external M-Pesa reversal references can be independently verified.
+
 ## Build with Lovable
 
 Continue developing this project in the [Lovable editor](https://lovable.dev/projects/e1fd7563-b6ca-429d-8733-6cadad9935c1).

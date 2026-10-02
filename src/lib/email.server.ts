@@ -9,12 +9,13 @@ export async function sendRecoveryEmail(input: {
   to: string;
   name: string;
   links: RecoveryLink[];
-}): Promise<void> {
-  const rawUser = process.env.SMTP_USER || process.env.GMAIL_USER || "verve.n.co.ke@gmail.com";
-  const rawPass = process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD;
+}): Promise<{ success: boolean; id?: string; simulated?: boolean; error?: string }> {
+  const rawUser =
+    process.env["SMTP_USER"] || process.env["GMAIL_USER"] || "verve.n.co.ke@gmail.com";
+  const rawPass = process.env["SMTP_PASS"] || process.env["GMAIL_APP_PASSWORD"];
   const siteUrl = process.env["SITE_URL"] ?? "https://hauntings-of-the-rift.lovable.app";
   const user = rawUser.trim();
-  const from = process.env.EMAIL_FROM || `"Verve & Co." <${user}>`;
+  const from = process.env["EMAIL_FROM"] || `"Verve & Co." <${user}>`;
 
   const list = input.links
     .map((link) => `<li><a href="${siteUrl}${link.url}">${link.tier} ticket</a></li>`)
@@ -28,29 +29,35 @@ export async function sendRecoveryEmail(input: {
   `;
 
   if (!rawPass) {
-    console.info(
-      `[recovery] Email simulated (no SMTP_PASS/GMAIL_APP_PASSWORD configured). Would have sent ${input.links.length} ticket link(s) to ${input.to}.`,
-    );
-    return;
+    return {
+      success: false,
+      simulated: false,
+      error: "Email delivery is not configured; the recovery message was not sent.",
+    };
   }
 
   const pass = rawPass.replace(/\s+/g, "");
 
   try {
     const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST || "smtp.gmail.com",
-      port: Number(process.env.SMTP_PORT) || 465,
-      secure: process.env.SMTP_SECURE === "false" ? false : true,
+      host: process.env["SMTP_HOST"] || "smtp.gmail.com",
+      port: Number(process.env["SMTP_PORT"]) || 465,
+      secure: process.env["SMTP_SECURE"] === "false" ? false : true,
       auth: { user, pass },
     });
 
-    await transporter.sendMail({
+    const info = await transporter.sendMail({
       from,
       to: input.to,
       subject: "Your Hauntings of the Rift tickets",
       html,
     });
+    return { success: true, id: info.messageId };
   } catch (error) {
     console.error("[recovery] SMTP provider unreachable:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 }

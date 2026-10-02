@@ -6,7 +6,9 @@ import {
 } from "../src/server/api-auth";
 import { handleApiRequest } from "../src/server/api-router";
 import { RefundService } from "../src/server/refund-service";
+import { sendRecoveryEmail } from "../src/lib/email.server";
 import { WhatsAppNotificationService } from "../src/server/whatsapp-service";
+import { notificationRetryDelaySeconds } from "../src/server/notification-outbox";
 
 function assert(condition: boolean, name: string) {
   if (!condition) throw new Error(`FAIL: ${name}`);
@@ -107,11 +109,84 @@ async function run() {
     requiredApiRoles("/api/notifications/reminder-24h")?.includes("admin") === true,
     "Protect administrative notification endpoints",
   );
-  const reconciliation = await RefundService.getReconciliationData();
   assert(
-    !reconciliation.available && reconciliation.ledger.length === 0,
-    "Do not synthesize reconciliation records without verified settlement data",
+    requiredApiRoles("/api/admin/notifications/outbox")?.includes("admin") === true &&
+      requiredApiRoles("/api/admin/notifications/outbox/process")?.includes("admin") === true,
+    "Protect notification outbox reads and retry processing with admin authorization",
   );
+  assert(
+    requiredApiRoles("/api/admin/refunds/process")?.includes("admin") === true,
+    "Keep the disabled refund endpoint restricted to admins",
+  );
+  assert(
+    notificationRetryDelaySeconds(1) === 30 &&
+      notificationRetryDelaySeconds(2) === 60 &&
+      notificationRetryDelaySeconds(5) === 480,
+    "Apply bounded exponential notification retry backoff",
+  );
+  const databaseEnvironment = new Map(
+    [
+      "DATABASE_URL",
+      "POSTGRES_URL",
+      "SQL_HOST",
+      "SQL_USER",
+      "SQL_DB_NAME",
+      "SQL_PASSWORD",
+      "SQL_PORT",
+    ].map((key) => [key, process.env[key]] as const),
+  );
+  let reconciliationFailedClosed = false;
+  try {
+    for (const key of databaseEnvironment.keys()) delete process.env[key];
+    await RefundService.getReconciliationData();
+  } catch (error) {
+    reconciliationFailedClosed =
+      error instanceof Error &&
+      error.message.includes("Shared PostgreSQL persistence is not configured");
+  } finally {
+    for (const [key, value] of databaseEnvironment) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+  assert(
+    reconciliationFailedClosed,
+    "Fail closed instead of synthesizing reconciliation records without configured persistence",
+  );
+  const refundResult = await RefundService.processRefund({
+    orderId: "unverified-order",
+    amountKes: 1000,
+    reason: "test",
+    refundType: "full",
+    reversalReference: "REVTEST123",
+    externalReversalProcessedAt: new Date().toISOString(),
+    confirmedExternalReversal: true,
+    processedBy: "test-admin",
+  });
+  assert(
+    !refundResult.success && refundResult.code === "REVERSAL_VERIFICATION_UNAVAILABLE",
+    "Keep refund recording disabled without independent external reversal verification",
+  );
+  const savedSmtpEnvironment = new Map(
+    ["SMTP_PASS", "GMAIL_APP_PASSWORD"].map((key) => [key, process.env[key]] as const),
+  );
+  try {
+    for (const key of savedSmtpEnvironment.keys()) delete process.env[key];
+    const recoveryEmail = await sendRecoveryEmail({
+      to: "test@example.invalid",
+      name: "Test",
+      links: [],
+    });
+    assert(
+      !recoveryEmail.success && recoveryEmail.simulated === false,
+      "Do not simulate ticket recovery email success without SMTP credentials",
+    );
+  } finally {
+    for (const [key, value] of savedSmtpEnvironment) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
   const savedWhatsAppEnvironment = new Map(
     ["WHATSAPP_API_KEY", "TWILIO_AUTH_TOKEN", "WHATSAPP_API_URL"].map(
       (key) => [key, process.env[key]] as const,
@@ -214,7 +289,15 @@ async function run() {
   assert(!failedLookup.success && failedLookup.status === 503, "Deny when role lookup fails");
 }
 
-run().catch((error: unknown) => {
-  console.error(error);
-  process.exit(1);
-});
+run()
+  .catch((error: unknown) => {
+    console.error(error);
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    const processGlobal = globalThis as typeof globalThis & {
+      _postgresPool?: import("pg").Pool;
+    };
+    await processGlobal._postgresPool?.end();
+    process.exit(process.exitCode ?? 0);
+  });

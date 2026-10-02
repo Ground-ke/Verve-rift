@@ -35,8 +35,7 @@ export function getSmtpTransporter(): nodemailer.Transporter | null {
     process.env.SMTP_USER ||
     process.env.SMTP_USERNAME ||
     process.env.GMAIL_USER ||
-    process.env.EMAIL_USER ||
-    "verve.n.co.ke@gmail.com";
+    process.env.EMAIL_USER;
   const rawPass =
     process.env.SMTP_PASS ||
     process.env.SMTP_PASSWORD ||
@@ -140,13 +139,10 @@ async function dispatchEmail({
     }
   }
 
-  // Do not report simulated delivery as a successful email send.
-  console.info(
-    `[Email Service - Simulated Gmail SMTP] Email to ${Array.isArray(to) ? to.join(", ") : to}: "${subject}" (Attachments: ${attachments?.map((a) => a.filename).join(", ") || "None"})`,
-  );
+  // Missing SMTP credentials are a delivery failure, not a preview mode.
   return {
     success: false,
-    simulated: true,
+    simulated: false,
     error: "Email delivery is not configured; the message was not sent.",
   };
 }
