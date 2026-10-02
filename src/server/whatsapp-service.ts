@@ -69,8 +69,10 @@ export interface WhatsAppNotificationPayload {
 
 export interface WhatsAppDispatchResult {
   success: boolean;
-  messageId: string;
-  status: "dispatched" | "simulated" | "failed";
+  messageId?: string;
+  status: "accepted" | "failed";
+  providerStatus: string;
+  error?: string;
   recipient: string;
   template: WhatsAppTemplateType;
   metaParameters: string[];
@@ -179,19 +181,17 @@ export class WhatsAppNotificationService {
       case "refund_notice": {
         const [p1, p2, p3, p4] = metaParams;
         return [
-          `ℹ️ *REFUND PROCESSED — HAUNTINGS OF THE RIFT*`,
+          `ℹ️ *EXTERNAL REVERSAL REFERENCE RECORDED*`,
           ``,
           `Hello ${p1},`,
           ``,
-          `Your refund request for Hauntings of the Rift has been processed successfully.`,
+          `The organizer recorded an external M-Pesa reversal reference for your Hauntings of the Rift order.`,
           ``,
-          `💰 *Amount Refunded:* KES ${p2}`,
-          `🧾 *Reference No:* ${p3}`,
+          `💰 *Recorded amount:* KES ${p2}`,
+          `🧾 *Organizer-provided reference:* ${p3}`,
           `📌 *Reason:* ${p4}`,
           ``,
-          `The funds have been reversed to your original payment account (M-Pesa / Card). Reversals typically reflect within 15–30 minutes, but may take up to 24 hours depending on network processing.`,
-          ``,
-          `Your associated digital passes have been invalidated. If you have questions, please reply directly to this message.`,
+          `The reversal was processed outside this app; this message does not confirm receipt of funds. Contact the organizer or M-Pesa to verify its status.`,
         ].join("\n");
       }
 
@@ -218,70 +218,101 @@ export class WhatsAppNotificationService {
     const formattedMessage = this.formatMessage(payload);
     const metaParams = this.getMetaParameters(payload.template, payload.params || {});
     const cleanPhone = payload.recipientPhone.replace(/[^0-9+]/g, "");
-    const messageId = `wa_msg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const timestamp = new Date().toISOString();
 
     const apiKey = process.env["WHATSAPP_API_KEY"];
     const endpoint = process.env["WHATSAPP_API_URL"];
 
-    if (apiKey && endpoint) {
-      try {
-        // Dispatch Meta Cloud API template payload if template specified
-        const bodyPayload = {
-          messaging_product: "whatsapp",
-          to: cleanPhone,
-          type: "template",
-          template: {
-            name: payload.template,
-            language: { code: "en" },
-            components: [
-              {
-                type: "body",
-                parameters: metaParams.map((text) => ({
-                  type: "text",
-                  text,
-                })),
-              },
-            ],
-          },
-        };
-
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(bodyPayload),
-        });
-
-        if (response.ok) {
-          return {
-            success: true,
-            messageId,
-            status: "dispatched",
-            recipient: cleanPhone,
-            template: payload.template,
-            metaParameters: metaParams,
-            formattedMessage,
-            timestamp,
-          };
-        }
-        console.warn("WhatsApp Gateway rejected the dispatch:", response.status);
-      } catch (err) {
-        console.warn("WhatsApp Gateway dispatch error:", err);
-      }
+    if (!apiKey || !endpoint) {
+      return {
+        success: false,
+        status: "failed",
+        providerStatus: "not_configured",
+        error: "WhatsApp delivery is not configured.",
+        recipient: cleanPhone,
+        template: payload.template,
+        metaParameters: metaParams,
+        formattedMessage,
+        timestamp,
+      };
     }
 
-    return {
-      success: false,
-      messageId,
-      status: "failed",
-      recipient: cleanPhone,
-      template: payload.template,
-      metaParameters: metaParams,
-      formattedMessage,
-      timestamp,
-    };
+    try {
+      // Dispatch Meta Cloud API template payload if template specified
+      const bodyPayload = {
+        messaging_product: "whatsapp",
+        to: cleanPhone,
+        type: "template",
+        template: {
+          name: payload.template,
+          language: { code: "en" },
+          components: [
+            {
+              type: "body",
+              parameters: metaParams.map((text) => ({
+                type: "text",
+                text,
+              })),
+            },
+          ],
+        },
+      };
+
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(bodyPayload),
+      });
+
+      let providerResponse: {
+        messages?: Array<{ id?: string }>;
+        error?: { message?: string };
+      } = {};
+      try {
+        providerResponse = (await response.json()) as typeof providerResponse;
+      } catch {
+        providerResponse = {};
+      }
+      const messageId = providerResponse.messages?.[0]?.id;
+      if (response.ok && messageId) {
+        return {
+          success: true,
+          messageId,
+          status: "accepted",
+          providerStatus: `http_${response.status}`,
+          recipient: cleanPhone,
+          template: payload.template,
+          metaParameters: metaParams,
+          formattedMessage,
+          timestamp,
+        };
+      }
+      return {
+        success: false,
+        status: "failed",
+        providerStatus: `http_${response.status}`,
+        error: providerResponse.error?.message || "WhatsApp provider did not accept the message.",
+        recipient: cleanPhone,
+        template: payload.template,
+        metaParameters: metaParams,
+        formattedMessage,
+        timestamp,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        status: "failed",
+        providerStatus: "transport_error",
+        error: error instanceof Error ? error.message : "WhatsApp provider request failed.",
+        recipient: cleanPhone,
+        template: payload.template,
+        metaParameters: metaParams,
+        formattedMessage,
+        timestamp,
+      };
+    }
   }
 }

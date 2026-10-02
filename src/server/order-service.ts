@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "crypto";
 import { validateAndNormalizeKenyanPhone } from "../lib/validation/phone";
 import type { OrderStatus, ReservationStatus } from "../lib/database.types";
 import { ManualOrderStore } from "./manual-order-store";
+import { PaymentOperationsStore } from "./payment-operations-store";
 
 // Reservation Time-To-Live in milliseconds (10 minutes)
 export const RESERVATION_TTL_MS = 10 * 60 * 1000;
@@ -716,44 +717,40 @@ export class OrderService {
   /**
    * Admin approves an order
    */
-  static async approveOrder(params: { orderId: string; adminEmail: string }): Promise<{
+  static async approveOrder(params: {
+    orderId: string;
+    adminEmail: string;
+    verifiedReceiptReference: string;
+    receivedAmountKes: number;
+    receivedAt: string;
+    evidenceNote: string;
+  }): Promise<{
     success: boolean;
     order?: StoredOrder;
     message: string;
     code?: string;
   }> {
-    const { orderId, adminEmail } = params;
-    let order = await ManualOrderStore.findOrder(orderId);
-
-    // Also match by orderNumber if orderId not found directly
-    if (!order) {
-      return { success: false, code: "NOT_FOUND", message: "Order not found." };
-    }
-
-    if (order.status !== "pending_approval" || !order.mpesaCode) {
+    const result = await PaymentOperationsStore.verifyAndApproveOrder({
+      orderId: params.orderId,
+      receiptReference: params.verifiedReceiptReference,
+      receivedAmountKes: params.receivedAmountKes,
+      receivedAt: params.receivedAt,
+      recordedBy: params.adminEmail,
+      evidenceNote: params.evidenceNote,
+    });
+    if (result.status !== "approved") {
       return {
         success: false,
-        code: "INVALID_ORDER_STATUS",
-        message: "Only an order with a submitted payment reference can be approved.",
+        code:
+          result.status === "amount_mismatch"
+            ? "PAYMENT_AMOUNT_MISMATCH"
+            : result.status === "duplicate_reference"
+              ? "DUPLICATE_PAYMENT_REFERENCE"
+              : "INVALID_ORDER_STATUS",
+        message: result.message,
       };
     }
-
-    order.status = "approved";
-    order.approvedBy = adminEmail;
-    order.approvedAt = new Date().toISOString();
-    order.updatedAt = new Date().toISOString();
-
-    const updated = await ManualOrderStore.updateOrderAndReservation(order, ["pending_approval"]);
-    if (!updated) {
-      return {
-        success: false,
-        code: "INVALID_ORDER_STATUS",
-        message: "Order status changed before approval; refresh and review it again.",
-      };
-    }
-    order = updated;
-
-    return { success: true, order, message: "Order successfully approved and verified." };
+    return { success: true, order: result.order, message: "Receipt recorded and order approved." };
   }
 
   /**

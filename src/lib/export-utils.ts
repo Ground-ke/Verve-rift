@@ -79,7 +79,7 @@ export function exportAttendeeListPdf(tickets: DigitalTicketRecord[]): void {
     format: "a4",
   });
 
-  const primaryColor = [22, 20, 24]; // Dark slate
+  const primaryColor = [22, 20, 24] as const; // Dark slate
   const accentColor = [217, 119, 6]; // Amber gold
 
   // Header Banner
@@ -177,17 +177,18 @@ export interface FinancialReconciliationRecord {
   attendeeName: string;
   tierName: string;
   amountKes: number;
-  gatewayFeeKes: number;
-  netRevenueKes: number;
-  status: "Matched" | "Discrepancy" | "Refunded" | "Pending Settlement";
+  gatewayFeeKes: number | null;
+  netRevenueKes: number | null;
+  status: "Verified Receipt" | "Discrepancy" | "Refunded" | "Pending Settlement";
   createdAt: string;
 }
 
 export interface FinancialSummaryTotals {
   grossRevenueKes: number;
   totalRefundsKes: number;
-  platformFeesKes: number;
-  netRevenueKes: number;
+  platformFeesKes: number | null;
+  netRevenueKes: number | null;
+  totalSettlementsKes: number;
   totalTicketsSold: number;
   totalRefundsCount: number;
 }
@@ -215,8 +216,8 @@ export function exportFinancialReconciliationCsv(
     escapeCsvValue(t.attendeeName),
     escapeCsvValue(t.tierName),
     escapeCsvValue(t.amountKes),
-    escapeCsvValue(t.gatewayFeeKes),
-    escapeCsvValue(t.netRevenueKes),
+    escapeCsvValue(t.gatewayFeeKes ?? "Not supplied"),
+    escapeCsvValue(t.netRevenueKes ?? "Not supplied"),
     escapeCsvValue(t.status),
   ]);
 
@@ -227,8 +228,9 @@ export function exportFinancialReconciliationCsv(
       "--- FINANCIAL RECONCILIATION SUMMARY ---",
       `Gross Volume (KES),${totals.grossRevenueKes}`,
       `Total Refunds (KES),${totals.totalRefundsKes}`,
-      `Gateway Fees (KES),${totals.platformFeesKes}`,
-      `Net Settled Revenue (KES),${totals.netRevenueKes}`,
+      `Gateway Fees (KES),${totals.platformFeesKes ?? "Not supplied"}`,
+      `Recorded Settlements (KES),${totals.totalSettlementsKes}`,
+      `Net Revenue (KES),${totals.netRevenueKes ?? "Not supplied"}`,
       `Total Tickets Issued,${totals.totalTicketsSold}`,
       "",
     ].join("\r\n");
@@ -253,7 +255,7 @@ export function exportFinancialReconciliationPdf(
     format: "a4",
   });
 
-  const primaryColor = [22, 20, 24]; // Dark slate
+  const primaryColor = [22, 20, 24] as const; // Dark slate
   const pageWidth = doc.internal.pageSize.width;
 
   // Header Banner
@@ -284,22 +286,28 @@ export function exportFinancialReconciliationPdf(
     {
       label: "GROSS REVENUE",
       val: `KES ${totals.grossRevenueKes.toLocaleString()}`,
-      color: [30, 41, 59],
+      color: [30, 41, 59] as const,
     },
     {
       label: "TOTAL REFUNDS",
       val: `KES ${totals.totalRefundsKes.toLocaleString()}`,
-      color: [153, 27, 27],
+      color: [153, 27, 27] as const,
     },
     {
       label: "GATEWAY FEES",
-      val: `KES ${totals.platformFeesKes.toLocaleString()}`,
-      color: [180, 83, 9],
+      val:
+        totals.platformFeesKes === null
+          ? "Not supplied"
+          : `KES ${totals.platformFeesKes.toLocaleString()}`,
+      color: [180, 83, 9] as const,
     },
     {
       label: "NET SETTLED",
-      val: `KES ${totals.netRevenueKes.toLocaleString()}`,
-      color: [21, 128, 61],
+      val:
+        totals.netRevenueKes === null
+          ? "Not supplied"
+          : `KES ${totals.netRevenueKes.toLocaleString()}`,
+      color: [21, 128, 61] as const,
     },
   ];
 
@@ -339,8 +347,8 @@ export function exportFinancialReconciliationPdf(
     t.orderNumber,
     t.attendeeName,
     t.amountKes.toLocaleString(),
-    t.gatewayFeeKes.toLocaleString(),
-    t.netRevenueKes.toLocaleString(),
+    t.gatewayFeeKes?.toLocaleString() || "Not supplied",
+    t.netRevenueKes?.toLocaleString() || "Not supplied",
     t.status,
   ]);
 
@@ -366,7 +374,7 @@ export function exportFinancialReconciliationPdf(
     didDrawCell: (data) => {
       if (data.section === "body" && data.column.index === 7) {
         const val = String(data.cell.raw);
-        if (val === "Matched") {
+        if (val === "Verified Receipt") {
           doc.setTextColor(21, 128, 61);
         } else if (val === "Refunded") {
           doc.setTextColor(185, 28, 28);

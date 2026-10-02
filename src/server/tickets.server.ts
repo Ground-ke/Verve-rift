@@ -4,7 +4,8 @@ import {
   createRecoveryToken,
   verifyRecoveryToken,
 } from "./crypto";
-import { sendTicketConfirmationEmail, sendRecoveryEmail, getSiteBaseUrl } from "./email.server";
+import { getSiteBaseUrl } from "./email.server";
+import { NotificationOutbox } from "./notification-outbox";
 import { OrderService } from "./order-service";
 import { ManualOrderStore } from "./manual-order-store";
 
@@ -336,24 +337,35 @@ export class TicketsServerService {
       const firstTicket = tickets[0];
       if (order.buyerEmail && firstTicket) {
         const siteBase = getSiteBaseUrl();
-        sendTicketConfirmationEmail({
-          to: order.buyerEmail,
-          buyerName: order.buyerName,
-          orderNumber: order.orderNumber,
-          totalKes: order.totalKes,
-          ticketTier: order.ticketName,
-          quantity: order.quantity,
-          ticketUrl: `${siteBase}/ticket/${firstTicket.ticketNumber}`,
-          tickets: tickets.map((t) => ({
-            ticketNumber: t.ticketNumber,
-            tierName: t.tierName,
-            attendeeName: t.attendeeName,
-            admitsCount: t.admitsCount,
-            ticketUrl: `${siteBase}/ticket/${t.ticketNumber}`,
-          })),
-        }).catch((emailErr) => {
-          console.warn("Could not dispatch ticket confirmation email:", emailErr);
-        });
+        try {
+          await NotificationOutbox.enqueueAndDispatch(
+            {
+              channel: "email",
+              type: "ticket_confirmation",
+              recipient: order.buyerEmail,
+              payload: {
+                to: order.buyerEmail,
+                buyerName: order.buyerName,
+                orderNumber: order.orderNumber,
+                totalKes: order.totalKes,
+                ticketTier: order.ticketName,
+                quantity: order.quantity,
+                ticketUrl: `${siteBase}/ticket/${firstTicket.ticketNumber}`,
+                tickets: tickets.map((ticket) => ({
+                  ticketNumber: ticket.ticketNumber,
+                  tierName: ticket.tierName,
+                  attendeeName: ticket.attendeeName,
+                  admitsCount: ticket.admitsCount,
+                  qrHash: ticket.qrHash,
+                  ticketUrl: `${siteBase}/ticket/${ticket.ticketNumber}`,
+                })),
+              },
+            },
+            `ticket-confirmation:${order.orderId}`,
+          );
+        } catch (emailError) {
+          console.error("Could not enqueue ticket confirmation email:", emailError);
+        }
       }
 
       return {
@@ -417,7 +429,6 @@ export class TicketsServerService {
     code?: string | undefined;
     message: string;
     rateLimited?: boolean | undefined;
-    previewToken?: string | undefined; // Provided for sandbox UI convenience
   }> {
     const { email, clientIp, baseUrl } = params;
     const now = Date.now();
@@ -461,24 +472,30 @@ export class TicketsServerService {
       );
     }
 
-    let recoveryToken: string | undefined;
-
     if (emailKey) {
-      recoveryToken = createRecoveryToken(emailKey, ONE_HOUR);
+      const recoveryToken = createRecoveryToken(emailKey, ONE_HOUR);
       const recoveryUrl = `${baseUrl.replace(/\/$/, "")}/recover?token=${recoveryToken}`;
 
-      await sendRecoveryEmail({
-        to: emailKey,
-        recoveryUrl,
-        ticketsCount: Math.max(1, matchingTickets.length),
-      });
+      try {
+        await NotificationOutbox.enqueueAndDispatch({
+          channel: "email",
+          type: "recovery",
+          recipient: emailKey,
+          payload: {
+            to: emailKey,
+            recoveryUrl,
+            ticketsCount: Math.max(1, matchingTickets.length),
+          },
+        });
+      } catch (error) {
+        console.error("Could not enqueue ticket recovery email:", error);
+      }
     }
 
     return {
       success: true,
       message:
-        "If matching tickets are associated with this email address, a secure recovery link has been dispatched to your inbox.",
-      previewToken: recoveryToken,
+        "If matching tickets are associated with this email address, a recovery email will be attempted. Email delivery is not guaranteed.",
     };
   }
 

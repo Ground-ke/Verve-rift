@@ -2,15 +2,9 @@ import { OrderService } from "./order-service";
 import { TicketsServerService } from "./tickets.server";
 import { AdminServerService } from "./admin-service";
 import { RefundService } from "./refund-service";
-import { WhatsAppNotificationService } from "./whatsapp-service";
-import {
-  sendTicketConfirmationEmail,
-  sendMpesaReceivedAcknowledgmentEmail,
-  sendOrganizerNewMpesaNotification,
-  sendBroadcastEmail,
-  generateMpesaReceivedEmailHtml,
-  getSiteBaseUrl,
-} from "./email.server";
+import { PaymentOperationsStore } from "./payment-operations-store";
+import { NotificationOutbox } from "./notification-outbox";
+import { getSiteBaseUrl } from "./email.server";
 import { generateTicketPdfBuffer, generateTicketPassImageBuffer } from "./pdf-ticket";
 import { SlidingWindowRateLimiter } from "./rate-limiter";
 import {
@@ -294,57 +288,70 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       const targetEmail = (order.buyerEmail || "").trim().toLowerCase();
 
       // Email failures must not undo the submitted payment claim.
-      let buyerEmailSent = false;
+      let buyerEmailStatus = "not_requested";
       if (targetEmail) {
         try {
-          const emailResult = await sendMpesaReceivedAcknowledgmentEmail({
-            to: targetEmail,
-            customerName: order.buyerName || "Valued Attendee",
-            orderNumber: order.orderNumber,
-            mpesaCode: extractedCode,
-            ticketTier: order.ticketName,
-            quantity: order.quantity,
-            totalKes: order.totalKes,
-            orderId: order.id,
-            checkoutToken: order.checkoutToken,
-          });
-          buyerEmailSent = emailResult.success && !emailResult.simulated;
-          if (!buyerEmailSent) {
+          const emailResult = await NotificationOutbox.enqueueAndDispatch({
+            channel: "email",
+            type: "mpesa_ack",
+            recipient: targetEmail,
+            payload: {
+              to: targetEmail,
+              customerName: order.buyerName || "Valued Attendee",
+              orderNumber: order.orderNumber,
+              mpesaCode: extractedCode,
+              ticketTier: order.ticketName,
+              quantity: order.quantity,
+              totalKes: order.totalKes,
+              orderId: order.id,
+              checkoutToken: order.checkoutToken,
+            },
+          }, `mpesa-ack:${order.id}:${extractedCode}`);
+          buyerEmailStatus = emailResult.status;
+          if (emailResult.status !== "accepted") {
             console.error(
-              "[Email Service] M-Pesa acknowledgment was not delivered:",
-              emailResult.error ||
-                (emailResult.simulated ? "Delivery was simulated." : "Unknown delivery failure."),
+              "[Email Service] M-Pesa acknowledgment outbox status:",
+              emailResult.lastError,
             );
           }
         } catch (error) {
-          console.error("[Email Service] M-Pesa acknowledgment dispatch error:", error);
+          buyerEmailStatus = "enqueue_failed";
+          console.error("[Email Service] M-Pesa acknowledgment could not be queued:", error);
         }
       }
 
-      let organizerEmailSent = false;
+      let organizerEmailStatus = "enqueue_failed";
       try {
-        const organizerResult = await sendOrganizerNewMpesaNotification({
-          orderNumber: order.orderNumber,
-          orderId: order.id,
-          mpesaCode: extractedCode,
-          customerName: order.buyerName || "Attendee",
-          customerEmail: targetEmail || "Not provided",
-          customerPhone: order.buyerPhone || "Not provided",
-          ticketTier: order.ticketName,
-          quantity: order.quantity,
-          totalKes: order.totalKes,
-          rawMessage: rawInput.trim(),
-        });
-        organizerEmailSent = organizerResult.success && !organizerResult.simulated;
-        if (!organizerEmailSent) {
+        const organizerEmail =
+          process.env["ORGANIZER_EMAIL"] ||
+          process.env["SMTP_USER"] ||
+          "verve.n.co.ke@gmail.com";
+        const organizerResult = await NotificationOutbox.enqueueAndDispatch({
+          channel: "email",
+          type: "organizer_mpesa",
+          recipient: organizerEmail,
+          payload: {
+            orderNumber: order.orderNumber,
+            orderId: order.id,
+            mpesaCode: extractedCode,
+            customerName: order.buyerName || "Attendee",
+            customerEmail: targetEmail || "Not provided",
+            customerPhone: order.buyerPhone || "Not provided",
+            ticketTier: order.ticketName,
+            quantity: order.quantity,
+            totalKes: order.totalKes,
+            rawMessage: rawInput.trim(),
+          },
+        }, `organizer-mpesa:${order.id}:${extractedCode}`);
+        organizerEmailStatus = organizerResult.status;
+        if (organizerResult.status !== "accepted") {
           console.error(
-            "[Email Service] Organizer notification was not delivered:",
-            organizerResult.error ||
-              (organizerResult.simulated ? "Delivery was simulated." : "Unknown delivery failure."),
+            "[Email Service] Organizer notification outbox status:",
+            organizerResult.lastError,
           );
         }
       } catch (error) {
-        console.error("[Email Service] Organizer notification dispatch error:", error);
+        console.error("[Email Service] Organizer notification could not be queued:", error);
       }
 
       return json({
@@ -353,8 +360,8 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         mpesaCode: extractedCode,
         status: "pending_approval",
         message: "M-Pesa code submitted and is awaiting organizer review.",
-        buyerEmailSent,
-        organizerEmailSent,
+        buyerEmailStatus,
+        organizerEmailStatus,
         order: result.order,
       });
     }
@@ -914,24 +921,60 @@ export async function handleApiRequest(request: Request): Promise<Response> {
 
       const orderId = String(body["order_id"] || body["orderId"] || "");
       const adminEmail = apiRequestUserId || "authenticated-admin";
+      const verifiedReceiptReference = String(
+        body["verified_receipt_reference"] || body["verifiedReceiptReference"] || "",
+      ).trim();
+      const receivedAmountKes = Number(body["received_amount_kes"] ?? body["receivedAmountKes"]);
+      const receivedAt = String(body["received_at"] || body["receivedAt"] || "");
+      const evidenceNote = String(body["evidence_note"] || body["evidenceNote"] || "").trim();
 
       if (!orderId) {
         return errorJson("order_id is required.", "INVALID_INPUT", 400);
       }
+      if (
+        !/^[A-Z0-9]{5,32}$/i.test(verifiedReceiptReference) ||
+        !Number.isSafeInteger(receivedAmountKes) ||
+        receivedAmountKes <= 0 ||
+        !Number.isFinite(Date.parse(receivedAt)) ||
+        Date.parse(receivedAt) > Date.now() ||
+        !evidenceNote
+      ) {
+        return errorJson(
+          "Verified receipt reference, positive statement amount, receipt date, and evidence note are required.",
+          "INVALID_VERIFICATION_EVIDENCE",
+          400,
+        );
+      }
 
       // 1. Approve order state in authoritative service
       const existingOrder = await OrderService._getOrderByIdInternal(orderId);
-      const approveResult =
-        existingOrder?.status === "approved" && existingOrder.mpesaCode
-          ? {
-              success: true,
-              order: existingOrder,
-              message: "Order is already approved; retrying ticket issuance.",
-            }
-          : await OrderService.approveOrder({ orderId, adminEmail });
+      const hasRecordedReceipt =
+        existingOrder?.status === "approved" &&
+        (await PaymentOperationsStore.hasReceiptForOrder(orderId));
+      const approveResult = hasRecordedReceipt
+        ? {
+            success: true,
+            order: existingOrder,
+            message: "Verified order is already approved; retrying ticket issuance.",
+          }
+        : await OrderService.approveOrder({
+            orderId,
+            adminEmail,
+            verifiedReceiptReference,
+            receivedAmountKes,
+            receivedAt,
+            evidenceNote,
+          });
 
       if (!approveResult.success || !approveResult.order) {
-        return json(approveResult, approveResult.code === "NOT_FOUND" ? 404 : 400);
+        const status =
+          approveResult.code === "NOT_FOUND"
+            ? 404
+            : approveResult.code === "DUPLICATE_PAYMENT_REFERENCE" ||
+                approveResult.code === "PAYMENT_AMOUNT_MISMATCH"
+              ? 409
+              : 400;
+        return json(approveResult, status);
       }
 
       const order = approveResult.order;
@@ -966,53 +1009,64 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       }
 
       // 3. Send ticket confirmation email to buyer if email provided
-      let emailResult = { success: false, simulated: false, reason: "No email provided on order" };
+      let emailDelivery: {
+        status: string;
+        providerStatus: string;
+        providerMessageId?: string;
+        lastError?: string;
+      } = { status: "not_requested", providerStatus: "no_recipient" };
       const recipientEmail = order.buyerEmail;
 
       if (recipientEmail) {
         const siteBase = getSiteBaseUrl();
         try {
-          const emailResponse = await sendTicketConfirmationEmail({
-            to: recipientEmail,
-            buyerName: order.buyerName,
-            orderNumber: order.orderNumber,
-            totalKes: order.totalKes,
-            ticketTier: order.ticketName,
-            quantity: order.quantity,
-            ticketUrl: `${siteBase}/ticket/${firstTicket.ticketNumber}`,
-            tickets: tickets.map((t) => ({
-              ticketNumber: t.ticketNumber,
-              tierName: t.tierName,
-              attendeeName: t.attendeeName,
-              admitsCount: t.admitsCount,
-              qrHash: t.qrHash,
-              ticketUrl: `${siteBase}/ticket/${t.ticketNumber}`,
-              qrDataUrl: `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(
-                JSON.stringify({
-                  code: t.ticketNumber,
-                  hash: t.qrHash,
-                  event: "HALLOWEEN_RIFT_2026",
-                  admits: t.admitsCount,
-                }),
-              )}`,
-            })),
-          });
-          const simulated = "simulated" in emailResponse ? Boolean(emailResponse.simulated) : false;
-          emailResult = {
-            success: emailResponse.success && !simulated,
-            simulated,
-            reason: simulated
-              ? "Email was not sent; the email service is in preview mode"
-              : emailResponse.success
-                ? "Email dispatched successfully"
-                : "Email service returned failure",
+          const outboxRecord = await NotificationOutbox.enqueueAndDispatch(
+            {
+              channel: "email",
+              type: "ticket_confirmation",
+              recipient: recipientEmail,
+              payload: {
+                to: recipientEmail,
+                buyerName: order.buyerName,
+                orderNumber: order.orderNumber,
+                totalKes: order.totalKes,
+                ticketTier: order.ticketName,
+                quantity: order.quantity,
+                ticketUrl: `${siteBase}/ticket/${firstTicket.ticketNumber}`,
+                tickets: tickets.map((ticket) => ({
+                  ticketNumber: ticket.ticketNumber,
+                  tierName: ticket.tierName,
+                  attendeeName: ticket.attendeeName,
+                  admitsCount: ticket.admitsCount,
+                  qrHash: ticket.qrHash,
+                  ticketUrl: `${siteBase}/ticket/${ticket.ticketNumber}`,
+                  qrDataUrl: `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(
+                    JSON.stringify({
+                      code: ticket.ticketNumber,
+                      hash: ticket.qrHash,
+                      event: "HALLOWEEN_RIFT_2026",
+                      admits: ticket.admitsCount,
+                    }),
+                  )}`,
+                })),
+              },
+            },
+            `ticket-confirmation:${order.id}`,
+          );
+          emailDelivery = {
+            status: outboxRecord.status,
+            providerStatus: outboxRecord.providerStatus || "unknown",
+            ...(outboxRecord.providerMessageId
+              ? { providerMessageId: outboxRecord.providerMessageId }
+              : {}),
+            ...(outboxRecord.lastError ? { lastError: outboxRecord.lastError } : {}),
           };
-        } catch (emailErr) {
-          console.error("Error sending ticket email:", emailErr);
-          emailResult = {
-            success: false,
-            simulated: false,
-            reason: emailErr instanceof Error ? emailErr.message : "Error sending email",
+        } catch (error) {
+          console.error("Could not enqueue ticket confirmation email:", error);
+          emailDelivery = {
+            status: "enqueue_failed",
+            providerStatus: "not_attempted",
+            lastError: error instanceof Error ? error.message : "Email could not be queued.",
           };
         }
       }
@@ -1022,7 +1076,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         message: `Order ${order.orderNumber} successfully approved and ${tickets.length} ticket(s) issued.`,
         order,
         tickets,
-        emailDelivery: emailResult,
+        emailDelivery,
       });
     }
 
@@ -1283,14 +1337,61 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     }
 
     // --------------------------------------------------------------------------
-    // 24. POST /api/admin/refunds/process (Execute Order / Ticket Refund)
+    // 24. POST /api/admin/refunds/process (Disabled pending external verification)
     // --------------------------------------------------------------------------
     if (pathname === "/api/admin/refunds/process" && method === "POST") {
       return errorJson(
-        "Refund processing is unavailable until an M-Pesa reversal can be verified and durably recorded.",
-        "REFUNDS_UNAVAILABLE",
+        "Refund recording is disabled until external M-Pesa reversals can be independently verified. This app does not initiate reversals.",
+        "REVERSAL_VERIFICATION_UNAVAILABLE",
         503,
       );
+    }
+
+    // --------------------------------------------------------------------------
+    // 24b. POST /api/admin/payments/settlements (Record External Statement Evidence)
+    // --------------------------------------------------------------------------
+    if (pathname === "/api/admin/payments/settlements" && method === "POST") {
+      let body: Record<string, unknown>;
+      try {
+        body = (await request.json()) as Record<string, unknown>;
+      } catch {
+        return errorJson("Invalid JSON request body.", "INVALID_JSON", 400);
+      }
+      const settlementReference = String(
+        body["settlementReference"] || body["settlement_reference"] || "",
+      ).trim();
+      const amountKes = Number(body["amountKes"] ?? body["amount_kes"]);
+      const settledAt = String(body["settledAt"] || body["settled_at"] || "");
+      const evidenceNote = String(body["evidenceNote"] || body["evidence_note"] || "").trim();
+      if (
+        !/^[A-Z0-9][A-Z0-9-]{4,39}$/i.test(settlementReference) ||
+        !Number.isSafeInteger(amountKes) ||
+        amountKes <= 0 ||
+        !Number.isFinite(Date.parse(settledAt)) ||
+        Date.parse(settledAt) > Date.now() ||
+        !evidenceNote
+      ) {
+        return errorJson(
+          "Statement reference, positive settlement amount, settlement date, and evidence note are required.",
+          "INVALID_SETTLEMENT_EVIDENCE",
+          400,
+        );
+      }
+      const result = await PaymentOperationsStore.recordSettlement({
+        settlementReference,
+        amountKes,
+        settledAt,
+        recordedBy: apiRequestUserId || "authenticated-admin",
+        evidenceNote,
+      });
+      if (result.duplicate) {
+        return errorJson(
+          "This settlement reference has already been recorded.",
+          "DUPLICATE_SETTLEMENT_REFERENCE",
+          409,
+        );
+      }
+      return json({ success: true, settlement: result.settlement });
     }
 
     // --------------------------------------------------------------------------
@@ -1390,16 +1491,46 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           409,
         );
       }
-      const dispatchResult = await WhatsAppNotificationService.sendNotification({
-        recipientPhone: ticket.buyerPhone,
-        template: data.templateType,
-        params: {
-          customerName: ticket.attendeeName,
-          ticketCode: ticket.ticketNumber,
+      const outboxRecord = await NotificationOutbox.enqueueAndDispatch({
+        channel: "whatsapp",
+        type: "whatsapp",
+        recipient: ticket.buyerPhone,
+        payload: {
+          recipientPhone: ticket.buyerPhone,
+          template: data.templateType,
+          params: {
+            customerName: ticket.attendeeName,
+            ticketCode: ticket.ticketNumber,
+          },
         },
       });
 
-      return json(dispatchResult, dispatchResult.success ? 200 : 503);
+      return json(
+        {
+          success: outboxRecord.status === "accepted",
+          status: outboxRecord.status,
+          providerStatus: outboxRecord.providerStatus,
+          providerMessageId: outboxRecord.providerMessageId,
+          attempts: outboxRecord.attempts,
+          nextAttemptAt: outboxRecord.availableAt,
+          error: outboxRecord.lastError,
+          deliveryNote:
+            outboxRecord.status === "accepted"
+              ? "Provider accepted the request; recipient delivery is not confirmed."
+              : "The message was not accepted by the provider and remains eligible for retry.",
+        },
+        outboxRecord.status === "accepted" ? 200 : 503,
+      );
+    }
+
+    if (pathname === "/api/admin/notifications/outbox" && method === "GET") {
+      const outbox = await NotificationOutbox.list();
+      return json({ success: true, outbox });
+    }
+
+    if (pathname === "/api/admin/notifications/outbox/process" && method === "POST") {
+      const processed = await NotificationOutbox.processDue();
+      return json({ success: true, processed });
     }
 
     // --------------------------------------------------------------------------
@@ -1470,13 +1601,15 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       }
 
       const body = sanitizeObject(rawBody);
-      const subject = String(body.subject || "").trim();
-      const headline = String(body.headline || "").trim() || subject;
-      const message = String(body.message || "").trim();
-      const targetFilter = String(body.targetFilter || "all"); // 'all' | 'approved' | 'tier:slug'
-      const ctaText = body.ctaText ? String(body.ctaText).trim() : undefined;
-      const ctaUrl = body.ctaUrl ? String(body.ctaUrl).trim() : undefined;
-      const testRecipient = body.testRecipient ? String(body.testRecipient).trim() : undefined;
+      const subject = String(body["subject"] || "").trim();
+      const headline = String(body["headline"] || "").trim() || subject;
+      const message = String(body["message"] || "").trim();
+      const targetFilter = String(body["targetFilter"] || "all"); // 'all' | 'approved' | 'tier:slug'
+      const ctaText = body["ctaText"] ? String(body["ctaText"]).trim() : undefined;
+      const ctaUrl = body["ctaUrl"] ? String(body["ctaUrl"]).trim() : undefined;
+      const testRecipient = body["testRecipient"]
+        ? String(body["testRecipient"]).trim()
+        : undefined;
 
       if (!subject || !message) {
         return errorJson("Subject and Message body are required.", "VALIDATION_ERROR", 400);
@@ -1484,21 +1617,28 @@ export async function handleApiRequest(request: Request): Promise<Response> {
 
       // If test recipient requested, dispatch single email
       if (testRecipient) {
-        const testResult = await sendBroadcastEmail({
-          to: testRecipient,
-          subject: `[TEST PREVIEW] ${subject}`,
-          headline,
-          message,
-          ctaText,
-          ctaUrl,
+        const testResult = await NotificationOutbox.enqueueAndDispatch({
+          channel: "email",
+          type: "broadcast",
+          recipient: testRecipient,
+          payload: {
+            subject: `[TEST PREVIEW] ${subject}`,
+            headline,
+            message,
+            ...(ctaText ? { ctaText } : {}),
+            ...(ctaUrl ? { ctaUrl } : {}),
+          },
         });
 
         return json({
-          success: testResult.success,
+          success: true,
           mode: "test",
           recipientCount: 1,
           testRecipient,
-          result: testResult,
+          providerStatus: testResult.providerStatus,
+          outboxStatus: testResult.status,
+          providerMessageId: testResult.providerMessageId,
+          lastError: testResult.lastError,
         });
       }
 
@@ -1538,20 +1678,24 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       const errors: string[] = [];
 
       for (const email of uniqueRecipients) {
-        const res = await sendBroadcastEmail({
-          to: email,
-          subject,
-          headline,
-          message,
-          ctaText,
-          ctaUrl,
+        const res = await NotificationOutbox.enqueueAndDispatch({
+          channel: "email",
+          type: "broadcast",
+          recipient: email,
+          payload: {
+            subject,
+            headline,
+            message,
+            ...(ctaText ? { ctaText } : {}),
+            ...(ctaUrl ? { ctaUrl } : {}),
+          },
         });
 
-        if (res.success) {
+        if (res.status === "accepted") {
           successCount++;
         } else {
           failureCount++;
-          if (res.error) errors.push(`${email}: ${res.error}`);
+          if (res.lastError) errors.push(`${email}: ${res.lastError}`);
         }
       }
 
@@ -1564,7 +1708,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           targetTable: "email_broadcasts",
           targetId: subject,
           metadata: {
-            details: `Sent broadcast "${subject}" to ${successCount} recipient(s). Filter: ${targetFilter}`,
+            details: `Provider accepted ${successCount} of ${uniqueRecipients.length} outbox notification(s) for "${subject}". Filter: ${targetFilter}`,
           },
         });
       } catch {
@@ -1575,7 +1719,9 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         success: true,
         mode: "live_broadcast",
         totalTargeted: uniqueRecipients.length,
-        dispatchedCount: successCount,
+        providerAcceptedCount: successCount,
+        recipientDeliveryConfirmedCount: 0,
+        queuedOrFailedCount: failureCount,
         failedCount: failureCount,
         errors: errors.slice(0, 5),
       });
@@ -1593,28 +1739,36 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       }
 
       const body = sanitizeObject(rawBody);
-      const email = String(body.email || "")
+      const email = String(body["email"] || "")
         .trim()
         .toLowerCase();
-      const name = String(body.name || "").trim();
+      const name = String(body["name"] || "").trim();
 
       if (!email || !email.includes("@")) {
         return errorJson("Valid email address is required.", "INVALID_EMAIL", 400);
       }
 
-      // Optionally send a welcome / lineup teaser email
-      await sendBroadcastEmail({
-        to: email,
-        subject: "Welcome to Verve & Co. — Hauntings of the Rift Updates",
-        headline: "You're on the Guest List for Rift Updates",
-        message: `Greetings ${name || "guest"},\n\nYou have subscribed to updates for Hauntings of the Rift on 31 October 2026 at Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru.`,
-        ctaText: "Explore Event & Passes",
-        ctaUrl: "https://verve-hauntings.vercel.app/checkout",
+      const welcomeEmail = await NotificationOutbox.enqueueAndDispatch({
+        channel: "email",
+        type: "broadcast",
+        recipient: email,
+        payload: {
+          subject: "Welcome to Verve & Co. — Hauntings of the Rift Updates",
+          headline: "You're on the Guest List for Rift Updates",
+          message: `Greetings ${name || "guest"},\n\nYou have subscribed to updates for Hauntings of the Rift on 31 October 2026 at Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru.`,
+          ctaText: "Explore Event & Passes",
+          ctaUrl: "https://verve-hauntings.vercel.app/checkout",
+        },
       });
 
       return json({
         success: true,
-        message: "Successfully subscribed to Hauntings of the Rift updates.",
+        message:
+          welcomeEmail.status === "accepted"
+            ? "The email provider accepted the welcome message; recipient delivery is not confirmed."
+            : `The welcome message was not accepted; outbox status is ${welcomeEmail.status}.`,
+        outboxStatus: welcomeEmail.status,
+        providerStatus: welcomeEmail.providerStatus,
       });
     }
 

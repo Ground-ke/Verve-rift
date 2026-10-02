@@ -27,19 +27,30 @@ import {
   type FinancialSummaryTotals,
 } from "../lib/export-utils";
 import type { RefundRecord } from "../server/refund-service";
+import type {
+  ManualPaymentReview,
+  ManualPaymentSettlement,
+} from "../server/payment-operations-store";
 
 export const Route = createFileRoute("/admin/reconciliation")({
   component: AdminReconciliationPage,
 });
 
 export function AdminReconciliationPage() {
+  const localDateTimeNow = () => {
+    const now = new Date();
+    return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+  };
   const [loading, setLoading] = useState(true);
   const [reconciliationAvailable, setReconciliationAvailable] = useState(false);
+  const [settlements, setSettlements] = useState<ManualPaymentSettlement[]>([]);
+  const [receiptReviews, setReceiptReviews] = useState<ManualPaymentReview[]>([]);
   const [totals, setTotals] = useState<FinancialSummaryTotals>({
     grossRevenueKes: 0,
     totalRefundsKes: 0,
-    platformFeesKes: 0,
-    netRevenueKes: 0,
+    platformFeesKes: null,
+    netRevenueKes: null,
+    totalSettlementsKes: 0,
     totalTicketsSold: 0,
     totalRefundsCount: 0,
   });
@@ -55,11 +66,20 @@ export function AdminReconciliationPage() {
   const [refundAmount, setRefundAmount] = useState<number>(1800);
   const [refundReason, setRefundReason] = useState("");
   const [refundType, setRefundType] = useState<"full" | "partial">("full");
+  const [reversalReference, setReversalReference] = useState("");
+  const [reversalProcessedAt, setReversalProcessedAt] = useState(localDateTimeNow);
+  const [confirmedExternalReversal, setConfirmedExternalReversal] = useState(false);
   const [isProcessingRefund, setIsProcessingRefund] = useState(false);
   const [refundFeedback, setRefundFeedback] = useState<{
     success: boolean;
     message: string;
   } | null>(null);
+  const [settlementReference, setSettlementReference] = useState("");
+  const [settlementAmount, setSettlementAmount] = useState("");
+  const [settlementDate, setSettlementDate] = useState(localDateTimeNow);
+  const [settlementEvidenceNote, setSettlementEvidenceNote] = useState("");
+  const [isSavingSettlement, setIsSavingSettlement] = useState(false);
+  const [settlementFeedback, setSettlementFeedback] = useState<string | null>(null);
 
   const fetchReconciliationData = async () => {
     setLoading(true);
@@ -75,20 +95,11 @@ export function AdminReconciliationPage() {
       if (res.ok) {
         const data = await res.json();
         setReconciliationAvailable(data.available === true);
-        setTotals(
-          data.available === true
-            ? data.totals
-            : {
-                grossRevenueKes: 0,
-                totalRefundsKes: 0,
-                platformFeesKes: 0,
-                netRevenueKes: 0,
-                totalTicketsSold: 0,
-                totalRefundsCount: 0,
-              },
-        );
-        setLedger(data.available === true ? data.ledger : []);
-        setRefunds(data.available === true ? data.refunds : []);
+        setTotals(data.totals);
+        setLedger(Array.isArray(data.ledger) ? data.ledger : []);
+        setRefunds(Array.isArray(data.refunds) ? data.refunds : []);
+        setSettlements(Array.isArray(data.settlements) ? data.settlements : []);
+        setReceiptReviews(Array.isArray(data.receiptReviews) ? data.receiptReviews : []);
       }
     } catch (err) {
       console.warn("Error loading reconciliation ledger:", err);
@@ -103,7 +114,13 @@ export function AdminReconciliationPage() {
 
   const handleProcessRefund = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!refundReason || (!refundOrderId && !refundTicketCode)) return;
+    if (
+      !refundReason ||
+      (!refundOrderId && !refundTicketCode) ||
+      !reversalReference ||
+      !confirmedExternalReversal
+    )
+      return;
 
     setIsProcessingRefund(true);
     setRefundFeedback(null);
@@ -124,7 +141,9 @@ export function AdminReconciliationPage() {
           amountKes: Number(refundAmount),
           reason: refundReason,
           refundType,
-          actorEmail: "admin@verve.co.ke",
+          reversalReference,
+          externalReversalProcessedAt: new Date(reversalProcessedAt).toISOString(),
+          confirmedExternalReversal,
         }),
       });
 
@@ -136,6 +155,8 @@ export function AdminReconciliationPage() {
           setRefundReason("");
           setRefundOrderId("");
           setRefundTicketCode("");
+          setReversalReference("");
+          setConfirmedExternalReversal(false);
           fetchReconciliationData();
         }, 1500);
       } else {
@@ -147,10 +168,46 @@ export function AdminReconciliationPage() {
     } catch {
       setRefundFeedback({
         success: false,
-        message: "Network error executing refund gateway transaction.",
+        message: "Could not check reversal-recording status.",
       });
     } finally {
       setIsProcessingRefund(false);
+    }
+  };
+
+  const handleRecordSettlement = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingSettlement(true);
+    setSettlementFeedback(null);
+    try {
+      const token = sessionStorage.getItem("rift_auth_token") || "admin_session";
+      const res = await fetch("/api/admin/payments/settlements", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          settlementReference,
+          amountKes: Number(settlementAmount),
+          settledAt: new Date(settlementDate).toISOString(),
+          evidenceNote: settlementEvidenceNote,
+        }),
+      });
+      const result = await res.json();
+      if (!res.ok || !result.success) {
+        setSettlementFeedback(result.message || "The settlement could not be recorded.");
+        return;
+      }
+      setSettlementFeedback("External settlement statement recorded.");
+      setSettlementReference("");
+      setSettlementAmount("");
+      setSettlementEvidenceNote("");
+      await fetchReconciliationData();
+    } catch {
+      setSettlementFeedback("Network error recording the settlement evidence.");
+    } finally {
+      setIsSavingSettlement(false);
     }
   };
 
@@ -184,7 +241,9 @@ export function AdminReconciliationPage() {
                   Financial Reconciliation
                 </h1>
                 <p className="text-sm text-slate-400">
-                  M-Pesa payout fees and reversals are not yet verified or durably recorded.
+                  Record receipts and settlements from organizer-held M-Pesa statements. Entries are
+                  manual evidence, not provider-verified. Refund recording remains disabled until
+                  external reversal references can be independently verified.
                 </p>
               </div>
             </div>
@@ -193,17 +252,21 @@ export function AdminReconciliationPage() {
           <div className="flex flex-wrap items-center gap-2.5">
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-950/40 border border-emerald-500/30 text-emerald-400 font-mono text-xs">
               <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-              <span>Reconciliation unavailable</span>
+              <span>
+                {reconciliationAvailable
+                  ? "Manual evidence available"
+                  : "Awaiting statement evidence"}
+              </span>
             </div>
 
             <button
               id="open-refund-modal-btn"
               disabled
-              title="Refunds are unavailable until an M-Pesa reversal can be verified."
-              className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 border border-white/10 text-slate-500 flex items-center gap-2 cursor-not-allowed"
+              title="Independent M-Pesa reversal verification is not configured."
+              className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-900 border border-white/10 text-slate-500 flex items-center gap-2 cursor-not-allowed"
             >
               <RotateCcw className="w-3.5 h-3.5" />
-              Process Refund
+              Reversal recording unavailable
             </button>
 
             <button
@@ -248,13 +311,11 @@ export function AdminReconciliationPage() {
               <DollarSign className="w-4 h-4 text-emerald-400" />
             </div>
             <div className="text-2xl font-bold text-white tracking-tight">
-              {reconciliationAvailable
-                ? `KES ${totals.grossRevenueKes.toLocaleString()}`
-                : "Unavailable"}
+              {ledger.length > 0 ? `KES ${totals.grossRevenueKes.toLocaleString()}` : "Unavailable"}
             </div>
             <div className="text-xs text-emerald-400 mt-2 flex items-center gap-1">
               <TrendingUp className="w-3.5 h-3.5" />
-              {reconciliationAvailable
+              {ledger.length > 0
                 ? `${totals.totalTicketsSold} tickets issued`
                 : "Verified settlement data unavailable"}
             </div>
@@ -283,30 +344,165 @@ export function AdminReconciliationPage() {
               <CreditCard className="w-4 h-4 text-amber-400" />
             </div>
             <div className="text-2xl font-bold text-amber-400 tracking-tight">
-              {reconciliationAvailable
-                ? `KES ${totals.platformFeesKes.toLocaleString()}`
-                : "Unavailable"}
+              {totals.platformFeesKes === null
+                ? "Not supplied"
+                : `KES ${totals.platformFeesKes.toLocaleString()}`}
             </div>
             <div className="text-xs text-slate-400 mt-2">
-              Provider fees require settlement records
+              No provider fee is inferred or estimated
             </div>
           </div>
 
           <div className="bg-gradient-to-br from-emerald-950/40 to-slate-900/80 border border-emerald-500/30 rounded-2xl p-5 relative overflow-hidden shadow-xl">
             <div className="flex items-center justify-between text-xs text-emerald-400 mb-1.5 font-medium">
-              <span>Net Settled Revenue</span>
+              <span>Recorded Settlements</span>
               <ShieldCheck className="w-4 h-4 text-emerald-400" />
             </div>
             <div className="text-2xl font-bold text-emerald-300 tracking-tight">
-              {reconciliationAvailable
-                ? `KES ${totals.netRevenueKes.toLocaleString()}`
-                : "Unavailable"}
+              {settlements.length > 0
+                ? `KES ${totals.totalSettlementsKes.toLocaleString()}`
+                : "No records"}
             </div>
             <div className="text-xs text-emerald-400/80 mt-2">
-              {reconciliationAvailable ? "Verified settlement data" : "Settlement is not verified"}
+              {settlements.length} manually recorded statement(s)
             </div>
           </div>
         </div>
+
+        <section className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <form
+            onSubmit={handleRecordSettlement}
+            className="bg-slate-900/60 border border-white/10 rounded-2xl p-5 space-y-4"
+          >
+            <div>
+              <h2 className="text-sm font-bold text-white uppercase tracking-wider">
+                Record M-Pesa Settlement
+              </h2>
+              <p className="text-xs text-slate-400 mt-1">
+                Transcribe an external merchant-statement entry. This app does not verify or
+                initiate payouts.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label className="space-y-1.5 text-xs text-slate-300">
+                Statement reference
+                <input
+                  required
+                  minLength={5}
+                  maxLength={40}
+                  value={settlementReference}
+                  onChange={(event) => setSettlementReference(event.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-white/10 text-white font-mono"
+                />
+              </label>
+              <label className="space-y-1.5 text-xs text-slate-300">
+                Amount received (KES)
+                <input
+                  required
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={settlementAmount}
+                  onChange={(event) => setSettlementAmount(event.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-white/10 text-white font-mono"
+                />
+              </label>
+              <label className="space-y-1.5 text-xs text-slate-300">
+                Settlement date and time
+                <input
+                  required
+                  type="datetime-local"
+                  value={settlementDate}
+                  onChange={(event) => setSettlementDate(event.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-white/10 text-white"
+                />
+              </label>
+              <label className="space-y-1.5 text-xs text-slate-300">
+                Evidence note
+                <input
+                  required
+                  value={settlementEvidenceNote}
+                  onChange={(event) => setSettlementEvidenceNote(event.target.value)}
+                  placeholder="Merchant statement date or page"
+                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-white/10 text-white"
+                />
+              </label>
+            </div>
+            {settlementFeedback && (
+              <p role="status" className="text-xs text-amber-200">
+                {settlementFeedback}
+              </p>
+            )}
+            <button
+              type="submit"
+              disabled={isSavingSettlement}
+              className="px-4 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-xs font-semibold text-white disabled:opacity-50"
+            >
+              {isSavingSettlement ? "Saving..." : "Save settlement evidence"}
+            </button>
+          </form>
+
+          <div className="bg-slate-900/60 border border-white/10 rounded-2xl p-5 space-y-3">
+            <div>
+              <h2 className="text-sm font-bold text-white uppercase tracking-wider">
+                Manual Statement Records
+              </h2>
+              <p className="text-xs text-slate-400 mt-1">
+                Provider fees and receipt-to-payout matching are not inferred.
+              </p>
+            </div>
+            {settlements.length === 0 ? (
+              <p className="text-xs text-slate-500">No settlement entries recorded.</p>
+            ) : (
+              <div className="max-h-52 overflow-y-auto divide-y divide-white/5">
+                {settlements.map((settlement) => (
+                  <div
+                    key={settlement.id}
+                    className="py-2 flex items-start justify-between gap-3 text-xs"
+                  >
+                    <div>
+                      <p className="font-mono text-slate-200">{settlement.settlementReference}</p>
+                      <p className="text-slate-500">
+                        {new Date(settlement.settledAt).toLocaleString()} · {settlement.recordedBy}
+                      </p>
+                      <p className="text-slate-400">{settlement.evidenceNote}</p>
+                    </div>
+                    <strong className="text-emerald-300 whitespace-nowrap">
+                      KES {settlement.amountKes.toLocaleString()}
+                    </strong>
+                  </div>
+                ))}
+              </div>
+            )}
+            {refunds.length > 0 && (
+              <div className="border-t border-white/10 pt-3">
+                <h3 className="text-xs font-semibold text-slate-200 mb-2">
+                  Recorded external reversals
+                </h3>
+                {refunds.map((refund) => (
+                  <p key={refund.id} className="text-xs text-slate-400 py-1">
+                    {refund.reversalReference} · KES {refund.amountKes.toLocaleString()} ·{" "}
+                    {refund.processedBy}
+                  </p>
+                ))}
+              </div>
+            )}
+            {receiptReviews.some((review) => review.status !== "accepted") && (
+              <div className="border-t border-amber-500/20 pt-3">
+                <h3 className="text-xs font-semibold text-amber-200 mb-2">Receipt exceptions</h3>
+                {receiptReviews
+                  .filter((review) => review.status !== "accepted")
+                  .slice(0, 5)
+                  .map((review) => (
+                    <p key={review.id} className="text-xs text-amber-100/80 py-1">
+                      {review.status.replaceAll("_", " ")} · {review.receiptReference} ·{" "}
+                      {review.evidenceNote}
+                    </p>
+                  ))}
+              </div>
+            )}
+          </div>
+        </section>
 
         {/* Search and Filters Bar */}
         <div className="bg-slate-900/60 border border-white/10 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
@@ -332,7 +528,7 @@ export function AdminReconciliationPage() {
               className="px-3 py-1.5 rounded-xl bg-slate-950 border border-white/10 text-xs text-slate-200 focus:outline-none"
             >
               <option value="ALL">All Statuses ({ledger.length})</option>
-              <option value="MATCHED">Matched</option>
+              <option value="VERIFIED RECEIPT">Verified Receipt</option>
               <option value="REFUNDED">Refunded</option>
               <option value="DISCREPANCY">Discrepancy</option>
               <option value="PENDING SETTLEMENT">Pending Settlement</option>
@@ -347,7 +543,9 @@ export function AdminReconciliationPage() {
               <h2 className="text-sm font-bold text-white uppercase tracking-wider">
                 Transaction Reconciliation Ledger
               </h2>
-              <p className="text-xs text-slate-400">Audited against Safaricom M-Pesa receipts</p>
+              <p className="text-xs text-slate-400">
+                Organizer-recorded receipt evidence; not verified by the M-Pesa provider
+              </p>
             </div>
             <span className="text-xs font-mono text-slate-400">
               Showing {filteredLedger.length} of {ledger.length} entries
@@ -391,15 +589,15 @@ export function AdminReconciliationPage() {
                         {item.amountKes.toLocaleString()}
                       </td>
                       <td className="py-3.5 px-4 text-right text-slate-400">
-                        {item.gatewayFeeKes.toLocaleString()}
+                        {item.gatewayFeeKes?.toLocaleString() || "—"}
                       </td>
                       <td className="py-3.5 px-4 text-right font-bold text-emerald-400">
-                        {item.netRevenueKes.toLocaleString()}
+                        {item.netRevenueKes?.toLocaleString() || "—"}
                       </td>
                       <td className="py-3.5 px-4 text-center">
                         <span
                           className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                            item.status === "Matched"
+                            item.status === "Verified Receipt"
                               ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
                               : item.status === "Refunded"
                                 ? "bg-rose-500/20 text-rose-300 border border-rose-500/30"
@@ -412,19 +610,7 @@ export function AdminReconciliationPage() {
                         </span>
                       </td>
                       <td className="py-3.5 px-4 text-right">
-                        {reconciliationAvailable && item.status !== "Refunded" && (
-                          <button
-                            disabled
-                            onClick={() => {
-                              setRefundOrderId(item.orderNumber);
-                              setRefundAmount(item.amountKes);
-                              setIsRefundModalOpen(true);
-                            }}
-                            className="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-slate-800 text-slate-500 border border-white/10 cursor-not-allowed"
-                          >
-                            Unavailable
-                          </button>
-                        )}
+                        <span className="text-slate-500">Reversal verification unavailable</span>
                       </td>
                     </tr>
                   ))
@@ -441,7 +627,7 @@ export function AdminReconciliationPage() {
               <div className="flex items-center justify-between border-b border-white/10 pb-4">
                 <div className="flex items-center gap-2.5 text-rose-400 font-bold font-serif text-lg">
                   <RotateCcw className="w-5 h-5" />
-                  Process Ticket Refund
+                  Record External M-Pesa Reversal
                 </div>
                 <button
                   onClick={() => setIsRefundModalOpen(false)}
@@ -467,6 +653,11 @@ export function AdminReconciliationPage() {
                   {refundFeedback.message}
                 </div>
               )}
+
+              <div className="rounded-xl border border-amber-500/30 bg-amber-950/20 p-3 text-xs text-amber-100">
+                Refund recording is disabled until external M-Pesa reversals can be independently
+                verified. This app never initiates reversals.
+              </div>
 
               <form onSubmit={handleProcessRefund} className="space-y-4 text-xs">
                 <div className="space-y-1.5">
@@ -524,6 +715,46 @@ export function AdminReconciliationPage() {
                   />
                 </div>
 
+                <div className="space-y-1.5">
+                  <label className="text-slate-300 font-semibold">
+                    External M-Pesa reversal reference
+                  </label>
+                  <input
+                    required
+                    minLength={5}
+                    maxLength={32}
+                    value={reversalReference}
+                    onChange={(event) => setReversalReference(event.target.value.toUpperCase())}
+                    placeholder="Reference from merchant statement"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-white/10 text-white font-mono"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-slate-300 font-semibold">
+                    When the external reversal was processed
+                  </label>
+                  <input
+                    required
+                    type="datetime-local"
+                    value={reversalProcessedAt}
+                    onChange={(event) => setReversalProcessedAt(event.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-white/10 text-white"
+                  />
+                </div>
+
+                <label className="flex gap-2 items-start text-amber-100">
+                  <input
+                    required
+                    type="checkbox"
+                    checked={confirmedExternalReversal}
+                    onChange={(event) => setConfirmedExternalReversal(event.target.checked)}
+                    className="mt-0.5 accent-rose-500"
+                  />
+                  I confirm the external M-Pesa reversal has already been processed and the
+                  reference above is copied from organizer evidence.
+                </label>
+
                 <div className="pt-2 flex items-center justify-end gap-3">
                   <button
                     type="button"
@@ -534,7 +765,8 @@ export function AdminReconciliationPage() {
                   </button>
                   <button
                     type="submit"
-                    disabled={isProcessingRefund}
+                    disabled
+                    title="Independent M-Pesa reversal verification is not configured."
                     className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-semibold flex items-center gap-2 shadow-lg disabled:opacity-50"
                   >
                     {isProcessingRefund ? (
@@ -542,7 +774,7 @@ export function AdminReconciliationPage() {
                     ) : (
                       <RotateCcw className="w-4 h-4" />
                     )}
-                    Execute Refund
+                    Unavailable
                   </button>
                 </div>
               </form>

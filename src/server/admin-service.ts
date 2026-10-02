@@ -1,6 +1,6 @@
 import { supabaseServer, isServerSupabaseConfigured } from "../lib/supabase/server";
 import { TicketsServerService, type DigitalTicketRecord } from "./tickets.server";
-import { sendTicketConfirmationEmail } from "./email.server";
+import { NotificationOutbox } from "./notification-outbox";
 
 export interface PromotionRecord {
   id: string;
@@ -57,7 +57,7 @@ export class AdminServerService {
     targetTable: string;
     targetId: string;
     metadata?: Record<string, unknown>;
-    ipAddress?: string;
+    ipAddress?: string | undefined;
   }): Promise<AuditLogEntry> {
     const log: AuditLogEntry = {
       id: `aud-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -303,18 +303,22 @@ export class AdminServerService {
       return { success: false, message: "Ticket does not have a recipient email address." };
     }
 
-    // Trigger dispatch via Resend service
-    const emailResult = await sendTicketConfirmationEmail({
-      to: ticket.buyerEmail,
-      attendeeName: ticket.attendeeName,
-      ticketCode: ticket.ticketNumber,
-      tierName: ticket.tierName,
-      admitsCount: ticket.admitsCount,
-      orderNumber: ticket.orderNumber,
-      totalKes: ticket.priceKes,
-      eventDate: ticket.venue.date,
-      venueName: ticket.venue.name,
-      qrHash: ticket.qrHash,
+    const emailResult = await NotificationOutbox.enqueueAndDispatch({
+      channel: "email",
+      type: "ticket_confirmation",
+      recipient: ticket.buyerEmail,
+      payload: {
+        to: ticket.buyerEmail,
+        attendeeName: ticket.attendeeName,
+        ticketCode: ticket.ticketNumber,
+        tierName: ticket.tierName,
+        admitsCount: ticket.admitsCount,
+        orderNumber: ticket.orderNumber,
+        totalKes: ticket.priceKes,
+        eventDate: ticket.venue.date,
+        venueName: ticket.venue.name,
+        qrHash: ticket.qrHash,
+      },
     });
 
     // Record audit log
@@ -328,14 +332,19 @@ export class AdminServerService {
       metadata: {
         recipientEmail: ticket.buyerEmail,
         attendeeName: ticket.attendeeName,
-        emailDeliveryStatus: emailResult.success ? "sent" : "delivery_logged",
+        emailProviderStatus: emailResult.providerStatus || "unknown",
+        emailOutboxStatus: emailResult.status,
+        emailProviderMessageId: emailResult.providerMessageId,
       },
       ipAddress: clientIp,
     });
 
     return {
       success: true,
-      message: `Admission ticket email re-dispatched to ${ticket.buyerEmail}.`,
+      message:
+        emailResult.status === "accepted"
+          ? `The email provider accepted the ticket email for ${ticket.buyerEmail}; recipient delivery is not confirmed.`
+          : `Ticket email queued for retry; current outbox status is ${emailResult.status}.`,
     };
   }
 
