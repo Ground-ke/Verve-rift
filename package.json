@@ -6,6 +6,9 @@
   "scripts": {
     "dev": "vite dev --host 0.0.0.0 --port 3000",
     "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test:auth": "bun tests/api-auth-tests.ts",
+    "test:postgres": "bun test ./tests/payment-operations-postgres.integration.ts",
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "start": "node .output/server/index.mjs",

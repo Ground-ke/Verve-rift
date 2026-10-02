@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 const GENERIC_MESSAGE =
-  "If an account or order matching that detail exists, we've sent ticket recovery instructions.";
+  "If matching tickets exist, a recovery email will be attempted. Email delivery is not guaranteed.";
 
 const RATE_LIMIT = 3;
 const WINDOW_MINUTES = 60;
@@ -24,7 +24,7 @@ export const recoverTicket = createServerFn({ method: "POST" })
     const { getRequestHeader } = await import("@tanstack/react-start/server");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { signTicketCode } = await import("./tickets.server");
-    const { sendRecoveryEmail } = await import("./email.server");
+    const { NotificationOutbox } = await import("@/server/notification-outbox");
 
     const identifier = data.identifier.toLowerCase();
     const ip =
@@ -103,11 +103,20 @@ export const recoverTicket = createServerFn({ method: "POST" })
         };
       });
       if (email) {
-        await sendRecoveryEmail({
-          to: email,
-          name: String(rows[0]?.["holder_name"] ?? "Guest"),
-          links,
-        });
+        try {
+          await NotificationOutbox.enqueueAndDispatch({
+            channel: "email",
+            type: "recovery_links",
+            recipient: email,
+            payload: {
+              to: email,
+              name: String(rows[0]?.["holder_name"] ?? "Guest"),
+              links,
+            },
+          });
+        } catch (error) {
+          console.error("Could not enqueue ticket recovery links:", error);
+        }
       }
     }
 

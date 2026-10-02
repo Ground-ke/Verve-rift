@@ -148,8 +148,8 @@ function TicketsPortalPage() {
             <div className="max-w-xl space-y-2">
               <h2 className="font-display text-xl text-bone">Access Your Event Passes</h2>
               <p className="text-xs text-muted-foreground">
-                Sign in with the Google account used during purchase, or use the secure one-time
-                guest recovery link sent to your email.
+                Sign in with the Google account used during purchase, or request a secure one-time
+                guest recovery email.
               </p>
             </div>
 

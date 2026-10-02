@@ -1,13 +1,25 @@
-import { useState } from "react";
-import { MessageSquare, Mail, Eye, AlertCircle, ExternalLink, Smartphone } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import {
+  MessageSquare,
+  Mail,
+  Eye,
+  AlertCircle,
+  ExternalLink,
+  Smartphone,
+  RefreshCw,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import type { NotificationOutboxRecord } from "@/server/notification-outbox";
 
 type NotificationChannel = "whatsapp" | "email";
 type TemplateKey = "booking_confirmation" | "event_reminder_24h" | "refund_notice";
 
 export function NotificationCenterTab() {
+  const [outbox, setOutbox] = useState<NotificationOutboxRecord[]>([]);
+  const [outboxError, setOutboxError] = useState("");
+  const [outboxBusy, setOutboxBusy] = useState(false);
   const [activeChannel, setActiveChannel] = useState<NotificationChannel>("whatsapp");
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateKey>("booking_confirmation");
 
@@ -19,6 +31,54 @@ export function NotificationCenterTab() {
   const handleChannelChange = (channel: NotificationChannel) => {
     setActiveChannel(channel);
   };
+
+  const fetchOutbox = useCallback(async () => {
+    setOutboxBusy(true);
+    setOutboxError("");
+    try {
+      const token = sessionStorage.getItem("rift_auth_token") || "admin_session";
+      const response = await fetch("/api/admin/notifications/outbox", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success || !Array.isArray(result.outbox)) {
+        throw new Error(result.message || "Notification outbox is unavailable.");
+      }
+      setOutbox(result.outbox as NotificationOutboxRecord[]);
+    } catch (error) {
+      setOutboxError(
+        error instanceof Error ? error.message : "Notification outbox is unavailable.",
+      );
+    } finally {
+      setOutboxBusy(false);
+    }
+  }, []);
+
+  const retryDueNotifications = useCallback(async () => {
+    setOutboxBusy(true);
+    setOutboxError("");
+    try {
+      const token = sessionStorage.getItem("rift_auth_token") || "admin_session";
+      const response = await fetch("/api/admin/notifications/outbox/process", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || "Due notifications could not be processed.");
+      }
+      await fetchOutbox();
+    } catch (error) {
+      setOutboxError(
+        error instanceof Error ? error.message : "Due notifications could not be processed.",
+      );
+      setOutboxBusy(false);
+    }
+  }, [fetchOutbox]);
+
+  useEffect(() => {
+    void fetchOutbox();
+  }, [fetchOutbox]);
 
   const getPlaintextPreview = () => {
     if (selectedTemplate === "booking_confirmation") {
@@ -185,6 +245,92 @@ export function NotificationCenterTab() {
               />
             </div>
           </div>
+
+          <section className="bg-card border border-border p-5 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="font-display text-lg text-bone">Delivery Outbox</h3>
+                <p className="text-xs text-muted-foreground">
+                  Provider acceptance is shown separately from confirmed recipient delivery.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void fetchOutbox()}
+                  disabled={outboxBusy}
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${outboxBusy ? "animate-spin" : ""}`} />
+                  Refresh
+                </Button>
+                <Button
+                  variant="event"
+                  size="sm"
+                  onClick={() => void retryDueNotifications()}
+                  disabled={outboxBusy}
+                >
+                  Process due retries
+                </Button>
+              </div>
+            </div>
+            {outboxError && (
+              <p role="alert" className="text-xs text-rose-300">
+                {outboxError}
+              </p>
+            )}
+            {outbox.length === 0 && !outboxBusy ? (
+              <p className="text-xs text-muted-foreground">No notification attempts recorded.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="text-muted-foreground uppercase border-b border-border">
+                    <tr>
+                      <th className="py-2 pr-3">Created</th>
+                      <th className="py-2 pr-3">Channel / type</th>
+                      <th className="py-2 pr-3">Recipient</th>
+                      <th className="py-2 pr-3">Provider status</th>
+                      <th className="py-2 pr-3">Attempts / next retry</th>
+                      <th className="py-2">Error</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/60">
+                    {outbox.map((record) => (
+                      <tr key={record.id}>
+                        <td className="py-2 pr-3 text-muted-foreground">
+                          {new Date(record.createdAt).toLocaleString()}
+                        </td>
+                        <td className="py-2 pr-3 text-bone">
+                          {record.channel} / {record.notificationType}
+                          <div className="text-[10px] uppercase text-amber-300">
+                            {record.status}
+                          </div>
+                        </td>
+                        <td className="py-2 pr-3 font-mono text-muted-foreground">
+                          {record.recipient}
+                        </td>
+                        <td className="py-2 pr-3 text-muted-foreground">
+                          {record.providerStatus || "not attempted"}
+                          {record.providerMessageId && (
+                            <div className="font-mono text-[10px]">{record.providerMessageId}</div>
+                          )}
+                        </td>
+                        <td className="py-2 pr-3 text-muted-foreground">
+                          {record.attempts} · {new Date(record.availableAt).toLocaleString()}
+                        </td>
+                        <td className="py-2 text-rose-300">{record.lastError || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <p className="text-[11px] text-muted-foreground">
+              Retry processing runs when the organizer triggers it or a deployment scheduler calls
+              the protected endpoint. Accepted messages are not marked delivered without provider
+              delivery receipts.
+            </p>
+          </section>
         </div>
 
         {/* Right Column: Live Template Preview (7 Cols) */}

@@ -96,6 +96,9 @@ export function ManualVerificationTab() {
   const [selectedOrder, setSelectedOrder] = useState<PendingOrderRecord | null>(null);
   const [isApproving, setIsApproving] = useState(false);
   const [approvalNotes, setApprovalNotes] = useState("");
+  const [verifiedReceiptReference, setVerifiedReceiptReference] = useState("");
+  const [receivedAmountKes, setReceivedAmountKes] = useState(0);
+  const [receivedAt, setReceivedAt] = useState("");
 
   // Rejection Modal State
   const [rejectingOrder, setRejectingOrder] = useState<PendingOrderRecord | null>(null);
@@ -104,6 +107,18 @@ export function ManualVerificationTab() {
   );
   const [isRejecting, setIsRejecting] = useState(false);
 
+  useEffect(() => {
+    if (!selectedOrder) return;
+    const now = new Date();
+    const localNow = new Date(now.getTime() - now.getTimezoneOffset() * 60_000)
+      .toISOString()
+      .slice(0, 16);
+    setVerifiedReceiptReference(selectedOrder.mpesaCode || "");
+    setReceivedAmountKes(selectedOrder.totalKes);
+    setReceivedAt(localNow);
+    setApprovalNotes("");
+  }, [selectedOrder]);
+
   // Fetch pending orders from API
   const fetchPendingOrders = async () => {
     try {
@@ -111,21 +126,21 @@ export function ManualVerificationTab() {
       const data = await res.json();
       if (data.success && Array.isArray(data.orders)) {
         const mapped: PendingOrderRecord[] = data.orders.map((o: Record<string, unknown>) => ({
-          id: String(o.id || o.orderId || ""),
-          orderNumber: String(o.orderNumber || o.id || ""),
-          customerName: String(o.buyerName || o.customerName || "Customer"),
-          customerEmail: String(o.buyerEmail || o.customerEmail || "No email provided"),
-          customerPhone: String(o.buyerPhone || o.customerPhone || ""),
-          ticketName: String(o.ticketName || "General Admission"),
-          quantity: Number(o.quantity || 1),
-          totalKes: Number(o.totalKes || 0),
-          mpesaCode: o.mpesaCode ? String(o.mpesaCode) : undefined,
-          mpesaMessage: o.mpesaMessage ? String(o.mpesaMessage) : undefined,
-          status: String(o.status || "pending") as PendingOrderRecord["status"],
-          createdAt: String(o.createdAt || new Date().toISOString()),
-          updatedAt: o.updatedAt ? String(o.updatedAt) : undefined,
-          rejectionReason: o.rejectionReason ? String(o.rejectionReason) : undefined,
-          approvedBy: o.approvedBy ? String(o.approvedBy) : undefined,
+          id: String(o["id"] || o["orderId"] || ""),
+          orderNumber: String(o["orderNumber"] || o["id"] || ""),
+          customerName: String(o["buyerName"] || o["customerName"] || "Customer"),
+          customerEmail: String(o["buyerEmail"] || o["customerEmail"] || "No email provided"),
+          customerPhone: String(o["buyerPhone"] || o["customerPhone"] || ""),
+          ticketName: String(o["ticketName"] || "General Admission"),
+          quantity: Number(o["quantity"] || 1),
+          totalKes: Number(o["totalKes"] || 0),
+          ...(o["mpesaCode"] ? { mpesaCode: String(o["mpesaCode"]) } : {}),
+          ...(o["mpesaMessage"] ? { mpesaMessage: String(o["mpesaMessage"]) } : {}),
+          status: String(o["status"] || "pending") as PendingOrderRecord["status"],
+          createdAt: String(o["createdAt"] || new Date().toISOString()),
+          ...(o["updatedAt"] ? { updatedAt: String(o["updatedAt"]) } : {}),
+          ...(o["rejectionReason"] ? { rejectionReason: String(o["rejectionReason"]) } : {}),
+          ...(o["approvedBy"] ? { approvedBy: String(o["approvedBy"]) } : {}),
         }));
         setOrders(() => {
           const result = mapped.filter(
@@ -200,13 +215,13 @@ export function ManualVerificationTab() {
               ticketName: fo.ticketName || "General Admission",
               quantity: fo.quantity || 1,
               totalKes: fo.totalKes || 0,
-              mpesaCode: fo.mpesaCode,
-              mpesaMessage: fo.mpesaMessage,
+              ...(fo.mpesaCode ? { mpesaCode: fo.mpesaCode } : {}),
+              ...(fo.mpesaMessage ? { mpesaMessage: fo.mpesaMessage } : {}),
               status: fo.status,
               createdAt: fo.createdAt || new Date().toISOString(),
-              updatedAt: fo.updatedAt,
-              rejectionReason: fo.rejectionReason,
-              approvedBy: fo.approvedBy,
+              ...(fo.updatedAt ? { updatedAt: fo.updatedAt } : {}),
+              ...(fo.rejectionReason ? { rejectionReason: fo.rejectionReason } : {}),
+              ...(fo.approvedBy ? { approvedBy: fo.approvedBy } : {}),
             };
             map.set(fo.orderId, item);
           }
@@ -293,8 +308,10 @@ export function ManualVerificationTab() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           order_id: selectedOrder.id,
-          admin_email: user?.email || "admin@verve.co.ke",
-          notes: approvalNotes,
+          verified_receipt_reference: verifiedReceiptReference.trim(),
+          received_amount_kes: receivedAmountKes,
+          received_at: new Date(receivedAt).toISOString(),
+          evidence_note: approvalNotes.trim(),
         }),
       });
 
@@ -311,16 +328,16 @@ export function ManualVerificationTab() {
         orderId: selectedOrder.id,
         adminEmail: user?.email || "admin@verve.co.ke",
         tickets: (data.tickets || []).map((t: Record<string, unknown>) => ({
-          ticketNumber: String(t.ticketNumber || ""),
+          ticketNumber: String(t["ticketNumber"] || ""),
           orderId: selectedOrder.id,
           orderNumber: selectedOrder.orderNumber,
           attendeeName: selectedOrder.customerName,
           attendeeEmail: selectedOrder.customerEmail,
           buyerPhone: selectedOrder.customerPhone,
           tierName: selectedOrder.ticketName,
-          admitsCount: Number(t.admitsCount || 1),
-          priceKes: Number(t.priceKes || selectedOrder.totalKes),
-          qrHash: String(t.qrHash || ""),
+          admitsCount: Number(t["admitsCount"] || 1),
+          priceKes: Number(t["priceKes"] || selectedOrder.totalKes),
+          qrHash: String(t["qrHash"] || ""),
           status: "valid",
         })),
       }).catch((fErr) => {
@@ -331,9 +348,19 @@ export function ManualVerificationTab() {
       approvedOrderIdsRef.current.add(selectedOrder.id);
       approvedOrderIdsRef.current.add(selectedOrder.orderNumber);
 
+      const emailStatus = data.emailDelivery?.status;
+      const hasRecipientEmail =
+        selectedOrder.customerEmail && selectedOrder.customerEmail !== "No email provided";
+      const emailMessage = hasRecipientEmail
+        ? emailStatus === "accepted"
+          ? "The email provider accepted the ticket confirmation; delivery is not confirmed."
+          : emailStatus === "queued" || emailStatus === "processing"
+            ? "The ticket confirmation is queued; check the notification outbox for its status."
+            : "The ticket confirmation was not accepted; check the notification outbox."
+        : "";
       toast.success(
-        `Order ${selectedOrder.orderNumber} approved! Ticket email sent to ${selectedOrder.customerEmail}`,
-        { duration: 5000 },
+        `Order ${selectedOrder.orderNumber} approved and tickets issued.${emailMessage ? ` ${emailMessage}` : ""}`,
+        { duration: 6500 },
       );
 
       // Remove approved order from pending list and sync cache
@@ -746,24 +773,65 @@ export function ManualVerificationTab() {
                 )}
               </div>
 
-              <div className="border border-emerald-500/40 bg-emerald-950/20 p-3 rounded text-xs text-bone-muted space-y-1">
-                <div className="flex items-center gap-1.5 text-emerald-400 font-semibold font-mono">
-                  <Mail className="w-4 h-4" /> Automated Delivery Dispatch
+              <div className="border border-amber-500/40 bg-amber-950/20 p-3 rounded text-xs text-bone-muted space-y-1">
+                <div className="flex items-center gap-1.5 text-amber-300 font-semibold font-mono">
+                  <ShieldCheck className="w-4 h-4" /> Manual statement verification required
                 </div>
                 <p>
-                  Upon approval, verified QR admission passes are minted and automatically emailed
-                  to <strong className="text-bone font-mono">{selectedOrder.customerEmail}</strong>.
-                  The order status will transition to{" "}
-                  <span className="text-emerald-300 font-mono">approved</span>.
+                  Compare the receipt and exact amount with the organizer's M-Pesa merchant
+                  statement. This app cannot verify a receipt with Safaricom.
                 </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-mono text-muted-foreground">
+                    Verified M-Pesa receipt reference:
+                  </label>
+                  <Input
+                    required
+                    minLength={5}
+                    maxLength={32}
+                    value={verifiedReceiptReference}
+                    onChange={(e) => setVerifiedReceiptReference(e.target.value.toUpperCase())}
+                    className="bg-background border-border text-xs text-bone font-mono"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-mono text-muted-foreground">
+                    Amount on statement (KES):
+                  </label>
+                  <Input
+                    required
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={receivedAmountKes}
+                    onChange={(e) => setReceivedAmountKes(Number(e.target.value))}
+                    className="bg-background border-border text-xs text-bone font-mono"
+                  />
+                </div>
+                <div className="space-y-1.5 sm:col-span-2">
+                  <label className="text-[11px] font-mono text-muted-foreground">
+                    Receipt date and time on statement:
+                  </label>
+                  <Input
+                    required
+                    type="datetime-local"
+                    value={receivedAt}
+                    onChange={(e) => setReceivedAt(e.target.value)}
+                    className="bg-background border-border text-xs text-bone"
+                  />
+                </div>
               </div>
 
               <div className="space-y-1.5">
                 <label className="text-[11px] font-mono text-muted-foreground">
-                  Verification Notes (Optional audit log):
+                  Evidence note (required audit detail):
                 </label>
                 <Input
-                  placeholder="e.g., Verified against statement ref #..."
+                  required
+                  placeholder="e.g., Confirmed in merchant statement for 1 Oct"
                   value={approvalNotes}
                   onChange={(e) => setApprovalNotes(e.target.value)}
                   className="bg-background border-border text-xs text-bone"

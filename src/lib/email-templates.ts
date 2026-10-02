@@ -326,7 +326,7 @@ export function generateRefundNoticeEmailHtml(params: {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Refund Processed - Hauntings of the Rift</title>
+  <title>External Reversal Reference Recorded - Hauntings of the Rift</title>
 </head>
 <body style="margin: 0; padding: 0; background-color: #0d0d0d; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #f3f4f6;">
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #0d0d0d; padding: 40px 10px;">
@@ -337,20 +337,20 @@ export function generateRefundNoticeEmailHtml(params: {
           <!-- Status Icon / Header -->
           <tr>
             <td align="center" style="padding-bottom: 20px;">
-              <span style="background-color: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #ef4444; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 6px 14px; border-radius: 20px; letter-spacing: 0.1em;">Order Reversal</span>
+              <span style="background-color: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #ef4444; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 6px 14px; border-radius: 20px; letter-spacing: 0.1em;">External Reversal Reference</span>
             </td>
           </tr>
 
           <tr>
             <td align="center" style="padding-bottom: 24px;">
-              <h1 style="margin: 0; font-size: 22px; font-weight: 800; color: #ffffff;">Refund Confirmation</h1>
+              <h1 style="margin: 0; font-size: 22px; font-weight: 800; color: #ffffff;">Reversal Reference Recorded</h1>
             </td>
           </tr>
 
           <tr>
             <td style="padding-bottom: 24px; font-size: 14px; line-height: 1.6; color: #a1a1aa;">
               Hi <strong>${customer_name}</strong>,<br><br>
-              This email confirms that a refund has been issued for your booking with <strong>Hauntings of the Rift</strong>.
+              The organizer recorded an external M-Pesa reversal reference for your booking with <strong>Hauntings of the Rift</strong>. This app did not initiate the reversal.
             </td>
           </tr>
 
@@ -360,11 +360,11 @@ export function generateRefundNoticeEmailHtml(params: {
               <table role="presentation" width="100%" style="background-color: #0d0d0d; border: 1px solid #262626; border-radius: 8px; padding: 20px;">
                 <tr>
                   <td style="padding-bottom: 12px;">
-                    <span style="font-size: 11px; text-transform: uppercase; color: #71717a;">Amount Reversed</span><br>
+                    <span style="font-size: 11px; text-transform: uppercase; color: #71717a;">Recorded amount</span><br>
                     <strong style="font-size: 18px; color: #ef4444;">KES ${refund_amount}</strong>
                   </td>
                   <td align="right" style="padding-bottom: 12px;">
-                    <span style="font-size: 11px; text-transform: uppercase; color: #71717a;">Gateway Ref</span><br>
+                    <span style="font-size: 11px; text-transform: uppercase; color: #71717a;">Organizer-provided reversal reference</span><br>
                     <span style="font-size: 13px; font-family: monospace; color: #d4d4d8;">${payment_ref}</span>
                   </td>
                 </tr>
@@ -378,11 +378,10 @@ export function generateRefundNoticeEmailHtml(params: {
             </td>
           </tr>
 
-          <!-- Notice on Invalidation -->
           <tr>
             <td style="padding-bottom: 24px;">
               <div style="background-color: rgba(249, 115, 22, 0.08); border-left: 3px solid #f97316; padding: 12px 16px; border-radius: 0 6px 6px 0; font-size: 13px; color: #d4d4d8;">
-                <strong>Note:</strong> Associated admission passes (Order ID: <span style="font-family: monospace;">${order_id}</span>) have been cryptographically revoked and will be rejected at gate scanners.
+                <strong>Order:</strong> <span style="font-family: monospace;">${order_id}</span>. This record does not confirm that funds have reached the recipient; contact the organizer or M-Pesa to verify the reversal status.
               </div>
             </td>
           </tr>

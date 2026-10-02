@@ -12,7 +12,6 @@ import {
   ArrowRight,
   ArrowLeft,
   RefreshCw,
-  ExternalLink,
   Users,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -57,10 +56,6 @@ function RecoverRouteComponent() {
   const [submittedEmail, setSubmittedEmail] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [rateLimited, setRateLimited] = useState(false);
-  const [previewToken, setPreviewToken] = useState<string | null>(null);
-
-  // Dynamic favicon reflects ticket recovery lookup or email dispatch
-  useFaviconLoading(isSubmitting || verifyingToken);
 
   // Token Verification State
   const [verifyingToken, setVerifyingToken] = useState(false);
@@ -68,6 +63,9 @@ function RecoverRouteComponent() {
   const [tokenError, setTokenError] = useState<string | null>(null);
   const [recoveredTickets, setRecoveredTickets] = useState<DigitalTicketData[]>([]);
   const [recoveredEmail, setRecoveredEmail] = useState<string | null>(null);
+
+  // Dynamic favicon reflects ticket recovery lookup or email dispatch
+  useFaviconLoading(isSubmitting || verifyingToken);
 
   // Verify recovery token if present in URL
   useEffect(() => {
@@ -132,9 +130,6 @@ function RecoverRouteComponent() {
 
       setSubmitted(true);
       setSubmittedEmail(trimmedEmail);
-      if (data.previewToken) {
-        setPreviewToken(data.previewToken);
-      }
     } catch {
       setFormError("Network error initiating ticket recovery. Please try again.");
     } finally {
@@ -360,10 +355,10 @@ function RecoverRouteComponent() {
             </div>
 
             <div className="space-y-2">
-              <h2 className="text-2xl font-display text-bone">CHECK YOUR INBOX</h2>
+              <h2 className="text-2xl font-display text-bone">REQUEST RECEIVED</h2>
               <p className="text-sm text-bone-muted max-w-md mx-auto">
                 If active tickets exist for <strong className="text-bone">{submittedEmail}</strong>,
-                a secure one-click recovery link has been dispatched to your email.
+                a recovery email will be attempted. Email delivery is not guaranteed.
               </p>
             </div>
 
@@ -377,23 +372,6 @@ function RecoverRouteComponent() {
               </p>
             </div>
 
-            {/* Sandbox Quick Access Helper */}
-            {previewToken && (
-              <div className="border border-oxblood/40 bg-oxblood/10 p-4 space-y-2 text-left">
-                <span className="text-[10px] uppercase tracking-widest text-oxblood-light font-bold block">
-                  Quick Access (Preview Token)
-                </span>
-                <p className="text-xs text-bone-muted">
-                  For your convenience, you can open your recovery session immediately:
-                </p>
-                <Button asChild variant="event" size="sm" className="w-full">
-                  <Link to="/recover" search={{ token: previewToken }}>
-                    Open Recovered Passes Now <ExternalLink className="ml-2 size-3.5" />
-                  </Link>
-                </Button>
-              </div>
-            )}
-
             <div className="pt-4 flex flex-col sm:flex-row gap-3 justify-center">
               <Button
                 variant="outline"
@@ -402,7 +380,6 @@ function RecoverRouteComponent() {
                 onClick={() => {
                   setSubmitted(false);
                   setEmail("");
-                  setPreviewToken(null);
                 }}
               >
                 Look Up Another Email
