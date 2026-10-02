@@ -86,10 +86,7 @@ const experiences: Array<[string, string, string, LucideIcon]> = [
 const faqs: Array<[string, string]> = [
   ["Who can attend?", "This is an 18+ event."],
   ["What is the dress code?", "Wickedly Fabulous."],
-  [
-    "Where is the event?",
-    "Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru.",
-  ],
+  ["Where is the event?", "Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru."],
   ["What time does it start?", "Doors open at 4 PM and the event continues till late."],
   [
     "How much are tickets?",
