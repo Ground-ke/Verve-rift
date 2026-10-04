@@ -610,7 +610,12 @@ export class OrderService {
     try {
       created = await ManualOrderStore.createOrder(newOrder, newReservation, ticket);
     } catch (error) {
-      console.error("Failed to persist order and inventory reservation:", error);
+      const pgError = error as { code?: unknown; message?: unknown; constraint?: unknown };
+      console.error("Failed to persist order and inventory reservation:", {
+        code: pgError?.code,
+        message: pgError?.message,
+        constraint: pgError?.constraint,
+      });
       return {
         success: false,
         code: "SERVER_ERROR",

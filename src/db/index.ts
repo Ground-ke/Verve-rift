@@ -14,6 +14,27 @@ export function isCloudSqlConfigured(): boolean {
   );
 }
 
+const STRIPPED_CONNECTION_PARAMS = [
+  "sslmode",
+  "sslcert",
+  "sslkey",
+  "sslrootcert",
+  "uselibpqcompat",
+  "supa",
+] as const;
+
+function sanitizeConnectionString(rawUrl: string): string {
+  try {
+    const parsed = new URL(rawUrl);
+    for (const param of STRIPPED_CONNECTION_PARAMS) {
+      parsed.searchParams.delete(param);
+    }
+    return parsed.toString();
+  } catch {
+    return rawUrl;
+  }
+}
+
 // Function to create or retrieve the connection pool using the Object Method
 export const createPool = (): Pool => {
   if (!isCloudSqlConfigured()) {
@@ -25,9 +46,13 @@ export const createPool = (): Pool => {
       connectionTimeoutMillis: 15000,
     };
 
-    if (process.env.DATABASE_URL || process.env.POSTGRES_URL) {
-      config.connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL;
-      if (process.env.SQL_SSL !== "false") {
+    if (process.env["DATABASE_URL"] || process.env["POSTGRES_URL"]) {
+      const rawUrl = process.env["DATABASE_URL"] || process.env["POSTGRES_URL"] || "";
+      // Strip sslmode, sslcert, sslkey, sslrootcert, uselibpqcompat, and supa query parameters
+      // before passing connectionString to pg so pg-connection-string does not override
+      // config.ssl = { rejectUnauthorized: false } with strict certificate verification.
+      config.connectionString = sanitizeConnectionString(rawUrl);
+      if (process.env["SQL_SSL"] !== "false") {
         config.ssl = { rejectUnauthorized: false };
       }
     } else {

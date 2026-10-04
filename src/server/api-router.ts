@@ -12,7 +12,7 @@ import {
   sendWhatsAppNotificationSchema,
 } from "../lib/validation/api-schemas";
 import { sanitizeObject } from "../lib/validation/sanitizer";
-import { isCloudSqlConfigured } from "../db/index.ts";
+import { getSharedPool, isCloudSqlConfigured } from "../db/index.ts";
 import {
   authorizeStaffApiRequest,
   getAuthenticatedApiUser,
@@ -20,6 +20,37 @@ import {
   readBearerToken,
   requiredApiRoles,
 } from "./api-auth";
+
+let dbReachableCache: { value: boolean; expiresAt: number } | null = null;
+
+async function checkDatabaseReachable(): Promise<boolean> {
+  if (!isCloudSqlConfigured()) {
+    dbReachableCache = null;
+    return false;
+  }
+  const now = Date.now();
+  if (dbReachableCache && dbReachableCache.expiresAt > now) {
+    return dbReachableCache.value;
+  }
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const queryPromise = getSharedPool()
+      .query("select 1")
+      .then(() => true);
+    const timeoutPromise = new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(false), 3000);
+    });
+    const reachable = await Promise.race([queryPromise, timeoutPromise]);
+    dbReachableCache = { value: reachable, expiresAt: Date.now() + 30_000 };
+    return reachable;
+  } catch {
+    dbReachableCache = { value: false, expiresAt: Date.now() + 30_000 };
+    return false;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
 
 export async function handleApiRequest(request: Request): Promise<Response> {
   const url = new URL(request.url);
@@ -100,21 +131,25 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     // --------------------------------------------------------------------------
     if (pathname === "/api/health") {
       const cloudSqlConfigured = isCloudSqlConfigured();
+      const databaseReachable = await checkDatabaseReachable();
       const supabaseConfigured = isStaffAuthConfigured();
       const manualMpesaConfigured = Boolean(
         process.env["VITE_MPESA_PAYBILL"] &&
         process.env["VITE_MPESA_ACCOUNT"] &&
         process.env["VITE_MPESA_ACCOUNT_NAME"],
       );
-      const ready = cloudSqlConfigured && supabaseConfigured && manualMpesaConfigured;
+      const ready =
+        cloudSqlConfigured && databaseReachable && supabaseConfigured && manualMpesaConfigured;
 
       return json({
         status: ready ? "ok" : "degraded",
         ready,
+        databaseReachable,
         runtime: process.env["VERCEL"] ? "vercel" : "node",
         time: new Date().toISOString(),
         databases: {
           cloudSqlConfigured,
+          databaseReachable,
           supabaseConfigured,
           firebaseConfigured: Boolean(
             process.env["FIREBASE_PROJECT_ID"] || process.env["VITE_FIREBASE_PROJECT_ID"],

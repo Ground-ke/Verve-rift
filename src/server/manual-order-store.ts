@@ -27,6 +27,12 @@ async function withTransaction<T>(work: (client: PoolClient) => Promise<T>): Pro
     await client.query("COMMIT");
     return result;
   } catch (error) {
+    const pgError = error as { code?: unknown; message?: unknown; constraint?: unknown };
+    console.error("[ManualOrderStore] Database transaction error:", {
+      code: pgError?.code,
+      message: pgError?.message,
+      constraint: pgError?.constraint,
+    });
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;
   } finally {
