@@ -39,13 +39,13 @@ import { AnalyticsLiveTab } from "@/components/admin/analytics-live-tab";
 import { ManualVerificationTab } from "@/components/admin/manual-verification-tab";
 import { AudienceBroadcastTab } from "@/components/admin/email-broadcast-tab";
 import { useAdminAuth } from "@/lib/auth/admin-auth-context";
-import {
-  subscribeToTickets,
-  subscribeToPendingOrders,
-  type FirestoreTicket,
-  type FirestoreOrder,
-} from "@/lib/firebase/firestore-service";
 import { toast } from "sonner";
+
+function formatHHMM(date: Date): string {
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${hours}:${minutes}`;
+}
 
 export const Route = createFileRoute("/admin")({
   head: () => ({
@@ -69,6 +69,8 @@ interface OverviewMetrics {
   totalRevenueKes: number;
   totalTicketsSold: number;
   checkedInCount: number;
+  totalCapacity: number;
+  committedPeople: number;
   remainingCapacity: number;
   activePromotionsCount: number;
   activeScannersCount: number;
@@ -95,6 +97,7 @@ interface NavItem {
   id: string;
   label: string;
   icon: LucideIcon;
+  hidden?: boolean;
   statusPill?: {
     text: string;
     variant: "green" | "amber" | "red" | "grey";
@@ -168,143 +171,84 @@ function AdminDashboardContent() {
     return 0;
   });
   const [pendingRevenueKes, setPendingRevenueKes] = useState<number>(0);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
+  const [updateFailed, setUpdateFailed] = useState<boolean>(false);
 
-  // Fetch overview metrics from backend and subscribe to live Firestore updates
+  // Fetch overview metrics and pending order counts from backend API
   const fetchMetrics = async () => {
     try {
-      const token =
-        (typeof window !== "undefined" ? sessionStorage.getItem("rift_auth_token") : null) ||
-        user?.token ||
-        "admin_session";
-      const headers = {
-        Authorization: `Bearer ${token}`,
-      };
-
-      const res = await fetch("/api/admin/overview", { headers });
+      const [res, pendingRes] = await Promise.all([
+        fetch("/api/admin/overview"),
+        fetch("/api/admin/orders/pending"),
+      ]);
       const data = await res.json();
-      if (data.success) {
-        const loadedMetrics: OverviewMetrics = {
-          totalRevenueKes: data.totalRevenueKes ?? 0,
-          totalTicketsSold: data.totalTicketsSold ?? data.totalSold ?? 0,
-          checkedInCount: data.checkedInCount ?? data.totalUsed ?? 0,
-          remainingCapacity: data.remainingCapacity ?? 900,
-          activePromotionsCount: data.activePromotionsCount ?? 4,
-          activeScannersCount: data.activeScannersCount ?? 3,
-          hourlySalesTrend: data.hourlySalesTrend || [],
-        };
-        setMetrics(loadedMetrics);
-        setIsProvisionalMetrics(false);
+      const pendingData = await pendingRes.json();
+
+      if (!res.ok || !data.success || !pendingRes.ok || !pendingData.success) {
+        setUpdateFailed(true);
+        return;
+      }
+
+      const loadedMetrics: OverviewMetrics = {
+        totalRevenueKes: data.totalRevenueKes ?? 0,
+        totalTicketsSold: data.totalTicketsSold ?? data.totalSold ?? 0,
+        checkedInCount: data.checkedInCount ?? data.totalUsed ?? 0,
+        totalCapacity: data.totalCapacity ?? 700,
+        committedPeople: data.committedPeople ?? 0,
+        remainingCapacity: data.remainingCapacity ?? 700,
+        activePromotionsCount: data.activePromotionsCount ?? 0,
+        activeScannersCount: data.activeScannersCount ?? 0,
+        hourlySalesTrend: data.hourlySalesTrend || [],
+      };
+      setMetrics(loadedMetrics);
+      setIsProvisionalMetrics(false);
+      try {
+        localStorage.setItem("rift_admin_metrics_cache", JSON.stringify(loadedMetrics));
+      } catch (_e) {
+        /* ignore */
+      }
+
+      if (Array.isArray(pendingData.orders)) {
+        setPendingOrdersCount(pendingData.orders.length);
         try {
-          localStorage.setItem("rift_admin_metrics_cache", JSON.stringify(loadedMetrics));
+          localStorage.setItem("rift_admin_pending_count", String(pendingData.orders.length));
         } catch (_e) {
           /* ignore */
         }
+        const totalKes = pendingData.orders.reduce(
+          (sum: number, o: { totalKes?: number }) => sum + (o.totalKes || 0),
+          0,
+        );
+        setPendingRevenueKes(totalKes);
       }
 
-      // Concurrently fetch pending orders to show pending revenue & queue size immediately
-      try {
-        const pendingRes = await fetch("/api/admin/orders/pending", { headers });
-        const pendingData = await pendingRes.json();
-        if (pendingData.success && Array.isArray(pendingData.orders)) {
-          setPendingOrdersCount(pendingData.orders.length);
-          try {
-            localStorage.setItem("rift_admin_pending_count", String(pendingData.orders.length));
-          } catch (_e) {
-            /* ignore */
-          }
-          const totalKes = pendingData.orders.reduce(
-            (sum: number, o: { totalKes?: number }) => sum + (o.totalKes || 0),
-            0,
-          );
-          setPendingRevenueKes(totalKes);
-        }
-      } catch {
-        // noop
-      }
+      setUpdateFailed(false);
+      setLastUpdatedAt(formatHHMM(new Date()));
     } catch (err) {
       console.warn("Failed to load metrics from API:", err);
+      setUpdateFailed(true);
     } finally {
       setIsLoadingMetrics(false);
     }
   };
 
   const handleManualRefresh = async () => {
+    setIsLoadingMetrics(true);
     await fetchMetrics();
     toast.success("Dashboard metrics refreshed");
   };
 
   useEffect(() => {
-    fetchMetrics();
+    void fetchMetrics();
 
-    // Subscribe to live Firestore tickets to keep dashboard metrics in sync
-    const unsubscribeTickets = subscribeToTickets((liveTickets: FirestoreTicket[]) => {
-      if (liveTickets && liveTickets.length > 0) {
-        setMetrics((prev) => {
-          const totalSold = liveTickets.length;
-          const checkedInCount = liveTickets.filter((t) => t.status === "used").length;
-          const totalRevenueKes = liveTickets
-            .filter((t) => t.status !== "cancelled" && t.status !== "refunded")
-            .reduce((sum, t) => sum + (t.priceKes || 0), 0);
-          const totalCapacity = 800;
-          const remainingCapacity = Math.max(0, totalCapacity - totalSold);
-
-          // Compute hourly sales velocity from actual timestamps
-          const hourMap = new Map<string, { sales: number; count: number }>();
-          liveTickets
-            .filter((t) => t.status !== "cancelled")
-            .forEach((t) => {
-              const d = new Date(t.createdAt || t.scannedAt || Date.now());
-              const hourKey = `${String(d.getHours()).padStart(2, "0")}:00`;
-              const current = hourMap.get(hourKey) || { sales: 0, count: 0 };
-              current.sales += t.priceKes || 0;
-              current.count += 1;
-              hourMap.set(hourKey, current);
-            });
-          const sortedHours = Array.from(hourMap.keys()).sort();
-          const hourlySalesTrend = sortedHours.map((hour) => ({
-            hour,
-            sales: hourMap.get(hour)!.sales,
-            count: hourMap.get(hour)!.count,
-          }));
-
-          const updated: OverviewMetrics = {
-            totalRevenueKes,
-            totalTicketsSold: totalSold,
-            checkedInCount,
-            remainingCapacity,
-            activePromotionsCount: prev?.activePromotionsCount ?? 4,
-            activeScannersCount: prev?.activeScannersCount ?? 3,
-            hourlySalesTrend:
-              hourlySalesTrend.length > 0 ? hourlySalesTrend : (prev?.hourlySalesTrend ?? []),
-          };
-          try {
-            localStorage.setItem("rift_admin_metrics_cache", JSON.stringify(updated));
-          } catch (_e) {
-            /* ignore */
-          }
-          return updated;
-        });
+    const interval = window.setInterval(() => {
+      if (typeof document === "undefined" || document.visibilityState === "visible") {
+        void fetchMetrics();
       }
-      setIsLoadingMetrics(false);
-    });
-
-    // Subscribe to live Firestore pending approval orders
-    const unsubscribePending = subscribeToPendingOrders((pendingOrders: FirestoreOrder[]) => {
-      if (pendingOrders && pendingOrders.length >= 0) {
-        setPendingOrdersCount(pendingOrders.length);
-        try {
-          localStorage.setItem("rift_admin_pending_count", String(pendingOrders.length));
-        } catch (_e) {
-          /* ignore */
-        }
-        const totalKes = pendingOrders.reduce((sum, o) => sum + (o.totalKes || 0), 0);
-        setPendingRevenueKes(totalKes);
-      }
-    });
+    }, 60_000);
 
     return () => {
-      if (unsubscribeTickets) unsubscribeTickets();
-      if (unsubscribePending) unsubscribePending();
+      window.clearInterval(interval);
     };
   }, []);
 
@@ -342,6 +286,7 @@ function AdminDashboardContent() {
       id: "promotions",
       label: "Promotion Codes",
       icon: Tag,
+      hidden: true,
       statusPill: {
         text: `${metrics?.activePromotionsCount ?? 4} Active`,
         variant: "green",
@@ -351,6 +296,7 @@ function AdminDashboardContent() {
       id: "scanners",
       label: "Check-in Devices",
       icon: QrCode,
+      hidden: true,
       statusPill: {
         text: `${metrics?.activeScannersCount ?? 3} Active`,
         variant: "green",
@@ -365,6 +311,7 @@ function AdminDashboardContent() {
       id: "analytics",
       label: "Page Analytics",
       icon: BarChart3,
+      hidden: true,
     },
     {
       id: "notifications",
@@ -413,7 +360,9 @@ function AdminDashboardContent() {
 
           {/* Navigation Links */}
           <nav className="space-y-1">
-            {navItems.map(({ id, label, icon: Icon, statusPill }) => {
+            {navItems
+              .filter((item) => !item.hidden)
+              .map(({ id, label, icon: Icon, statusPill }) => {
               const isActive = activeTab === id;
               return (
                 <button
@@ -567,10 +516,24 @@ function AdminDashboardContent() {
 
           {/* Right Header: Role & Interactive Refresh */}
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-            {/* Live Firestore Sync Status */}
-            <div className="flex items-center gap-1.5 border border-emerald-500/40 bg-emerald-950/40 px-2 py-1 text-emerald-400 font-mono text-[11px]">
-              <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="hidden sm:inline font-semibold">LIVE SYNC</span>
+            {/* Last Updated Status */}
+            <div
+              className={`flex items-center gap-1.5 border px-2 py-1 font-mono text-[11px] ${
+                updateFailed
+                  ? "border-red-500/40 bg-red-950/40 text-red-300"
+                  : "border-emerald-500/40 bg-emerald-950/40 text-emerald-400"
+              }`}
+            >
+              <span
+                className={`size-1.5 rounded-full ${
+                  updateFailed ? "bg-red-400" : "bg-emerald-400"
+                }`}
+              />
+              <span className="hidden sm:inline font-semibold">
+                {updateFailed
+                  ? "Update failed. Click Refresh"
+                  : `Last updated ${lastUpdatedAt || "--:--"}`}
+              </span>
             </div>
 
             {/* Role Badge */}
@@ -729,10 +692,11 @@ function AdminDashboardContent() {
                     <Users className="size-5 text-amber-400 opacity-90 shrink-0" />
                   </div>
                   <div className="font-display text-3xl text-bone tracking-tight">
-                    {metrics?.remainingCapacity ?? 800} / 800
+                    {metrics?.remainingCapacity ?? 700} / {metrics?.totalCapacity ?? 700}
                   </div>
                   <p className="text-[11px] text-muted-foreground font-mono">
-                    Venue capacity (800 max)
+                    {metrics?.committedPeople ?? 0} committed · {metrics?.remainingCapacity ?? 700}{" "}
+                    remaining ({metrics?.totalCapacity ?? 700} capacity)
                   </p>
                 </div>
               </div>

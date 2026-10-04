@@ -75,9 +75,20 @@ function PayRouteComponent() {
 
   // Stable idempotency key initialization — preserved across all retries in this session
 
-  // Expiration countdown timer
+  // Expiration countdown timer (orders in pending_approval never expire regardless of expires_at)
   useEffect(() => {
     if (!order || !order.expiresAt) return;
+    if (
+      order.status === "pending_approval" ||
+      paymentPhase === "pending_approval" ||
+      order.status === "paid" ||
+      order.status === "approved" ||
+      order.status === "completed" ||
+      paymentPhase === "paid"
+    ) {
+      setSecondsRemaining(undefined);
+      return;
+    }
 
     const updateTimer = () => {
       const remaining = Math.max(
@@ -85,9 +96,9 @@ function PayRouteComponent() {
         Math.round((new Date(order.expiresAt).getTime() - Date.now()) / 1000),
       );
       setSecondsRemaining(remaining);
-      if (remaining <= 0 && paymentPhase !== "paid") {
+      if (remaining <= 0) {
         setPaymentPhase("failed");
-        setPaymentError("Your 10-minute reservation has expired. Please select passes again.");
+        setPaymentError("Your 30-minute reservation has expired. Please select passes again.");
       }
     };
 
@@ -187,6 +198,7 @@ function PayRouteComponent() {
 
         const data = (await res.json()) as OrderData;
         setOrder(data);
+        if (data.mpesaCode) setMpesaReceipt(data.mpesaCode);
 
         if (data.status === "paid" || data.status === "approved" || data.status === "completed") {
           const verified = await handleVerifyCompletedPayment(data.orderId, data.checkoutToken);
@@ -196,6 +208,12 @@ function PayRouteComponent() {
             setPaymentPhase("pending_approval");
             setPaymentError("Payment is approved, but ticket issuance could not be confirmed yet.");
           }
+        } else if (data.status === "pending_approval") {
+          setPaymentPhase("pending_approval");
+          setPaymentError(null);
+        } else if (data.status === "rejected") {
+          setPaymentPhase("failed");
+          setPaymentError(data.rejectionReason || "The organizer rejected this payment claim.");
         }
       } catch {
         setErrorMessage("Network error fetching order details. Please try refreshing.");
@@ -209,7 +227,9 @@ function PayRouteComponent() {
 
   // Poll the authoritative order API; browser-side Firebase mirrors are not authoritative.
   useEffect(() => {
-    if (!search.orderId || !search.token) return;
+    const activeOrderId = order?.orderId || search.orderId;
+    const activeToken = order?.checkoutToken || search.token;
+    if (!activeOrderId || !activeToken) return;
     let disposed = false;
     let refreshing = false;
 
@@ -217,9 +237,9 @@ function PayRouteComponent() {
       if (disposed || refreshing) return;
       refreshing = true;
       try {
-        const query = new URLSearchParams({ token: search.token! });
+        const query = new URLSearchParams({ token: activeToken });
         const response = await fetch(
-          `/api/orders/${encodeURIComponent(search.orderId!)}?${query.toString()}`,
+          `/api/orders/${encodeURIComponent(activeOrderId)}?${query.toString()}`,
         );
         if (!response.ok) {
           console.error("Could not refresh order status:", response.status);
@@ -236,7 +256,7 @@ function PayRouteComponent() {
           currentOrder.status === "paid" ||
           currentOrder.status === "completed"
         ) {
-          const issued = await handleVerifyCompletedPayment(currentOrder.orderId, search.token!);
+          const issued = await handleVerifyCompletedPayment(currentOrder.orderId, activeToken);
           if (issued) {
             setPaymentPhase("paid");
             setPaymentError(null);
@@ -246,6 +266,7 @@ function PayRouteComponent() {
           }
         } else if (currentOrder.status === "pending_approval") {
           setPaymentPhase("pending_approval");
+          setPaymentError(null);
         } else if (currentOrder.status === "rejected") {
           setPaymentPhase("failed");
           setPaymentError(
@@ -264,7 +285,7 @@ function PayRouteComponent() {
       disposed = true;
       window.clearInterval(interval);
     };
-  }, [search.orderId, search.token, handleVerifyCompletedPayment]);
+  }, [order?.orderId, order?.checkoutToken, search.orderId, search.token, handleVerifyCompletedPayment]);
 
   const [isSubmittingCode, setIsSubmittingCode] = useState(false);
 
@@ -304,6 +325,17 @@ function PayRouteComponent() {
 
       setMpesaReceipt(code);
       setPaymentPhase("pending_approval");
+      setPaymentError(null);
+      setOrder((prev) =>
+        prev
+          ? {
+              ...prev,
+              status: "pending_approval",
+              mpesaCode: code,
+              ...(data.order?.expiresAt ? { expiresAt: data.order.expiresAt } : {}),
+            }
+          : prev,
+      );
     } catch {
       setPaymentError("Network error submitting M-Pesa code. Please try again.");
     } finally {
@@ -319,15 +351,18 @@ function PayRouteComponent() {
         headers: { Authorization: `Bearer ${order.checkoutToken}` },
       });
       const data = await res.json();
-      if (res.ok && ["paid", "approved", "completed"].includes(data.status)) {
-        const verified = await handleVerifyCompletedPayment(
-          order.orderId,
-          order.checkoutToken,
-          data.mpesaCode,
-        );
-        if (verified) {
-          setPaymentPhase("paid");
-          setMpesaReceipt(data.mpesaCode || null);
+      if (res.ok) {
+        setOrder(data);
+        if (["paid", "approved", "completed"].includes(data.status)) {
+          const verified = await handleVerifyCompletedPayment(order.orderId, order.checkoutToken);
+          if (verified) {
+            setPaymentPhase("paid");
+            setMpesaReceipt(data.mpesaCode || null);
+            setPaymentError(null);
+          }
+        } else if (data.status === "pending_approval") {
+          setPaymentPhase("pending_approval");
+          setPaymentError(null);
         }
       }
     } catch {
@@ -409,6 +444,15 @@ function PayRouteComponent() {
             Complete your M-Pesa transaction to receive your cryptographic admission pass.
           </p>
         </div>
+
+        {(order.status === "pending_approval" || paymentPhase === "pending_approval") && (
+          <div
+            role="status"
+            className="mb-6 border border-amber-500/50 bg-amber-950/30 px-4 py-3 text-sm font-mono text-amber-200"
+          >
+            Payment received and awaiting verification. Tickets are issued within 24 hours.
+          </div>
+        )}
 
         {/* Payment Component Card */}
         <PaymentStatusCard

@@ -233,8 +233,7 @@ export function TicketTiersPricingTab() {
             </h2>
           </div>
           <p className="text-xs text-muted-foreground font-mono mt-1">
-            Authoritatively modify ticket tier names, admission pricing (KES), guest capacity per
-            pass, and activate or pause tiers in real-time.
+            Ticket prices are set in code and cannot be edited here.
           </p>
         </div>
 
@@ -252,11 +251,11 @@ export function TicketTiersPricingTab() {
 
           <Button
             size="sm"
-            onClick={() => setShowAddForm(!showAddForm)}
+            disabled
             className="bg-oxblood text-bone hover:bg-oxblood/90 border border-amber-500/30 text-xs h-9"
           >
             <Plus className="w-3.5 h-3.5 mr-1.5" />
-            {showAddForm ? "Close Form" : "Add Ticket Tier"}
+            Add Ticket Tier
           </Button>
         </div>
       </div>
@@ -284,6 +283,8 @@ export function TicketTiersPricingTab() {
                 onChange={(e) => setNewSlug(e.target.value)}
                 placeholder="e.g. vip-pass"
                 className="bg-background border-border text-bone text-xs font-mono"
+                readOnly
+                disabled
                 required
               />
             </div>
@@ -297,6 +298,8 @@ export function TicketTiersPricingTab() {
                 onChange={(e) => setNewName(e.target.value)}
                 placeholder="e.g. VIP Red Carpet Pass"
                 className="bg-background border-border text-bone text-xs"
+                readOnly
+                disabled
                 required
               />
             </div>
@@ -313,6 +316,8 @@ export function TicketTiersPricingTab() {
                 onChange={(e) => setNewPrice(e.target.value)}
                 placeholder="2500"
                 className="bg-background border-border text-amber-400 font-mono text-xs font-bold"
+                readOnly
+                disabled
                 required
               />
             </div>
@@ -329,6 +334,8 @@ export function TicketTiersPricingTab() {
                 onChange={(e) => setNewAdmits(e.target.value)}
                 placeholder="1"
                 className="bg-background border-border text-bone font-mono text-xs"
+                readOnly
+                disabled
                 required
               />
             </div>
@@ -346,7 +353,7 @@ export function TicketTiersPricingTab() {
               <Button
                 type="submit"
                 size="sm"
-                disabled={isCreating}
+                disabled
                 className="bg-emerald-600 hover:bg-emerald-500 text-bone text-xs font-mono px-4"
               >
                 {isCreating ? (
@@ -397,21 +404,22 @@ export function TicketTiersPricingTab() {
                   </p>
                 </div>
 
-                {/* Middle: Live Edit Controls */}
+                {/* Middle: Read-Only Controls */}
                 <div className="md:col-span-7 grid gap-4 sm:grid-cols-3">
-                  {/* Name Edit */}
+                  {/* Name (Read-Only) */}
                   <div className="space-y-1">
                     <Label className="text-[11px] font-mono text-muted-foreground uppercase">
                       Tier Name
                     </Label>
                     <Input
                       value={tier.name}
-                      onChange={(e) => handleFieldChange(tier.slug, "name", e.target.value)}
+                      readOnly
+                      disabled
                       className="bg-background/80 border-border text-bone text-xs"
                     />
                   </div>
 
-                  {/* Price Edit */}
+                  {/* Price (Read-Only) */}
                   <div className="space-y-1">
                     <Label className="text-[11px] font-mono text-muted-foreground uppercase flex items-center justify-between">
                       <span>Price (KES)</span>
@@ -422,14 +430,13 @@ export function TicketTiersPricingTab() {
                       min="0"
                       step="50"
                       value={tier.priceKes}
-                      onChange={(e) =>
-                        handleFieldChange(tier.slug, "priceKes", Number(e.target.value))
-                      }
+                      readOnly
+                      disabled
                       className="bg-background/80 border-border text-amber-300 font-mono text-sm font-bold"
                     />
                   </div>
 
-                  {/* Admits Count Edit */}
+                  {/* Admits Count (Read-Only) */}
                   <div className="space-y-1">
                     <Label className="text-[11px] font-mono text-muted-foreground uppercase">
                       Admits Count
@@ -439,20 +446,18 @@ export function TicketTiersPricingTab() {
                       min="1"
                       max="20"
                       value={tier.admitsCount}
-                      onChange={(e) =>
-                        handleFieldChange(tier.slug, "admitsCount", Number(e.target.value))
-                      }
+                      readOnly
+                      disabled
                       className="bg-background/80 border-border text-bone font-mono text-xs"
                     />
                   </div>
                 </div>
 
-                {/* Right: Actions */}
+                {/* Right: Actions (Disabled) */}
                 <div className="md:col-span-2 flex flex-col gap-2 justify-end">
                   <Button
                     size="sm"
-                    onClick={() => handleSaveTier(tier)}
-                    disabled={isSaving}
+                    disabled
                     className="w-full bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-mono h-9"
                   >
                     {isSaving ? (
@@ -466,11 +471,7 @@ export function TicketTiersPricingTab() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => {
-                      const newActive = !tier.active;
-                      handleFieldChange(tier.slug, "active", newActive);
-                      handleSaveTier({ ...tier, active: newActive });
-                    }}
+                    disabled
                     className="text-xs text-muted-foreground hover:text-bone h-8"
                   >
                     {tier.active ? (
@@ -496,12 +497,8 @@ export function TicketTiersPricingTab() {
       <div className="border border-border/60 bg-card/40 p-4 text-xs font-mono text-muted-foreground flex items-start gap-3">
         <HelpCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
         <div className="space-y-1">
-          <p className="text-bone font-semibold">Pricing Synchronization Note:</p>
-          <p>
-            When ticket prices are modified here, changes take effect immediately across the public
-            checkout flow and M-Pesa amount verification. Existing active reservations will honor
-            their locked snapshot until their 10-minute hold expires.
-          </p>
+          <p className="text-bone font-semibold">Pricing Policy:</p>
+          <p>Ticket prices are set in code and cannot be edited here.</p>
         </div>
       </div>
     </div>

@@ -32,7 +32,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { QRCodeSVG } from "qrcode.react";
 import { toast } from "sonner";
 import { useAdminAuth } from "../../lib/auth/admin-auth-context";
-import { subscribeToTickets, type FirestoreTicket } from "../../lib/firebase/firestore-service";
+
+function formatHHMM(date: Date): string {
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${hours}:${minutes}`;
+}
 
 export interface TicketItem {
   id: string;
@@ -114,103 +119,58 @@ export function TicketManagementTab() {
   const [isLoadingAudit, setIsLoadingAudit] = useState(false);
 
   const [isResending, setIsResending] = useState<string | null>(null);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
+  const [updateFailed, setUpdateFailed] = useState<boolean>(false);
 
-  // Load tickets from server and subscribe to Firestore live stream
+  // Load tickets from server API
   const fetchTickets = async () => {
     try {
       const res = await fetch("/api/admin/tickets");
       const data = await res.json();
-      if (data.success && Array.isArray(data.tickets)) {
-        const safeServerTickets = data.tickets.filter(
-          (t: TicketItem) =>
-            t &&
-            typeof t === "object" &&
-            typeof t.ticketNumber === "string" &&
-            t.ticketNumber.trim().length > 0 &&
-            t.attendeeName,
-        );
-        setTickets((prev) => {
-          const map = new Map<string, TicketItem>();
-          prev.forEach((t) => {
-            if (t && t.ticketNumber) map.set(t.ticketNumber, t);
-          });
-          safeServerTickets.forEach((t: TicketItem) => map.set(t.ticketNumber, t));
-          const sorted = Array.from(map.values()).sort(
-            (a, b) =>
-              (b.issuedAt ? new Date(b.issuedAt).getTime() : 0) -
-              (a.issuedAt ? new Date(a.issuedAt).getTime() : 0),
-          );
-          try {
-            localStorage.setItem("rift_admin_tickets_cache", JSON.stringify(sorted));
-          } catch (_e) {
-            /* ignore */
-          }
-          return sorted;
-        });
+      if (!res.ok || !data.success || !Array.isArray(data.tickets)) {
+        setUpdateFailed(true);
+        return;
       }
+      const safeServerTickets = data.tickets.filter(
+        (t: TicketItem) =>
+          t &&
+          typeof t === "object" &&
+          typeof t.ticketNumber === "string" &&
+          t.ticketNumber.trim().length > 0 &&
+          t.attendeeName,
+      );
+      const sorted = [...safeServerTickets].sort(
+        (a, b) =>
+          (b.issuedAt ? new Date(b.issuedAt).getTime() : 0) -
+          (a.issuedAt ? new Date(a.issuedAt).getTime() : 0),
+      );
+      setTickets(sorted);
+      try {
+        localStorage.setItem("rift_admin_tickets_cache", JSON.stringify(sorted));
+      } catch (_e) {
+        /* ignore */
+      }
+      setUpdateFailed(false);
+      setLastUpdatedAt(formatHHMM(new Date()));
     } catch (err) {
-      console.warn("Server tickets fetch fallback:", err);
+      console.warn("Server tickets fetch failed:", err);
+      setUpdateFailed(true);
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchTickets();
+    void fetchTickets();
 
-    // Real-time synchronization with Firestore tickets collection
-    const unsubscribe = subscribeToTickets((liveTickets: FirestoreTicket[]) => {
-      if (liveTickets) {
-        setTickets((prev) => {
-          const map = new Map<string, TicketItem>();
-          // Retain any existing server-side tickets
-          prev.forEach((t) => map.set(t.ticketNumber, t));
-
-          // Apply live Firestore tickets
-          liveTickets.forEach((ft) => {
-            map.set(ft.ticketNumber, {
-              id: ft.ticketNumber,
-              orderId: ft.orderId,
-              orderNumber: ft.orderNumber || ft.orderId,
-              ticketNumber: ft.ticketNumber,
-              qrHash: ft.qrHash || ft.ticketNumber,
-              tierSlug: ft.tierSlug || "general-admission",
-              tierName: ft.tierName || "General Admission",
-              admitsCount: ft.admitsCount || 1,
-              attendeeName: ft.attendeeName,
-              buyerEmail: ft.attendeeEmail,
-              buyerPhone: ft.buyerPhone || "",
-              status: ft.status || "valid",
-              priceKes: ft.priceKes || 0,
-              issuedAt: ft.createdAt || new Date().toISOString(),
-              scannedBy: ft.scannedBy || null,
-              usedAt: ft.scannedAt || null,
-              venue: {
-                name: "Top Cliff Lodge",
-                address: "Nakuru-Nairobi Highway, Free Area",
-                city: "Nakuru, Kenya",
-                date: "Saturday, 31 October 2026",
-                time: "4:00 PM till late",
-              },
-            });
-          });
-
-          const sorted = Array.from(map.values()).sort(
-            (a, b) => new Date(b.issuedAt).getTime() - new Date(a.issuedAt).getTime(),
-          );
-          try {
-            localStorage.setItem("rift_admin_tickets_cache", JSON.stringify(sorted));
-          } catch (_e) {
-            /* ignore */
-          }
-          return sorted;
-        });
+    const interval = window.setInterval(() => {
+      if (typeof document === "undefined" || document.visibilityState === "visible") {
+        void fetchTickets();
       }
-      setIsLoading(false);
-    });
+    }, 60_000);
 
     return () => {
-      if (unsubscribe) unsubscribe();
+      window.clearInterval(interval);
     };
   }, []);
 
@@ -390,9 +350,23 @@ export function TicketManagementTab() {
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-emerald-950/40 border border-emerald-500/30 rounded text-emerald-400 font-mono text-xs">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span>Live Firestore Sync</span>
+            <div
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 border rounded font-mono text-xs ${
+                updateFailed
+                  ? "bg-red-950/40 border-red-500/30 text-red-300"
+                  : "bg-emerald-950/40 border-emerald-500/30 text-emerald-400"
+              }`}
+            >
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  updateFailed ? "bg-red-400" : "bg-emerald-400"
+                }`}
+              />
+              <span>
+                {updateFailed
+                  ? "Update failed. Click Refresh"
+                  : `Last updated ${lastUpdatedAt || "--:--"}`}
+              </span>
             </div>
 
             <Button

@@ -33,12 +33,12 @@ import {
 import { Textarea } from "../ui/textarea";
 import { toast } from "sonner";
 import { useAdminAuth } from "../../lib/auth/admin-auth-context";
-import {
-  subscribeToPendingOrders,
-  approveOrderInFirestore,
-  rejectOrderInFirestore,
-  FirestoreOrder,
-} from "../../lib/firebase/firestore-service";
+
+function formatHHMM(date: Date): string {
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${hours}:${minutes}`;
+}
 
 export interface PendingOrderRecord {
   id: string;
@@ -89,6 +89,8 @@ export function ManualVerificationTab() {
     return "";
   });
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
+  const [updateFailed, setUpdateFailed] = useState<boolean>(false);
   const hasAutoSelectedRef = useRef(false);
   const approvedOrderIdsRef = useRef<Set<string>>(new Set());
 
@@ -124,126 +126,63 @@ export function ManualVerificationTab() {
     try {
       const res = await fetch("/api/admin/orders/pending");
       const data = await res.json();
-      if (data.success && Array.isArray(data.orders)) {
-        const mapped: PendingOrderRecord[] = data.orders.map((o: Record<string, unknown>) => ({
-          id: String(o["id"] || o["orderId"] || ""),
-          orderNumber: String(o["orderNumber"] || o["id"] || ""),
-          customerName: String(o["buyerName"] || o["customerName"] || "Customer"),
-          customerEmail: String(o["buyerEmail"] || o["customerEmail"] || "No email provided"),
-          customerPhone: String(o["buyerPhone"] || o["customerPhone"] || ""),
-          ticketName: String(o["ticketName"] || "General Admission"),
-          quantity: Number(o["quantity"] || 1),
-          totalKes: Number(o["totalKes"] || 0),
-          ...(o["mpesaCode"] ? { mpesaCode: String(o["mpesaCode"]) } : {}),
-          ...(o["mpesaMessage"] ? { mpesaMessage: String(o["mpesaMessage"]) } : {}),
-          status: String(o["status"] || "pending") as PendingOrderRecord["status"],
-          createdAt: String(o["createdAt"] || new Date().toISOString()),
-          ...(o["updatedAt"] ? { updatedAt: String(o["updatedAt"]) } : {}),
-          ...(o["rejectionReason"] ? { rejectionReason: String(o["rejectionReason"]) } : {}),
-          ...(o["approvedBy"] ? { approvedBy: String(o["approvedBy"]) } : {}),
-        }));
-        setOrders(() => {
-          const result = mapped.filter(
-            (o) =>
-              (o.status === "pending_approval" || o.status === "pending") &&
-              !approvedOrderIdsRef.current.has(o.id) &&
-              !approvedOrderIdsRef.current.has(o.orderNumber),
-          );
-          try {
-            localStorage.setItem("rift_admin_pending_orders_cache", JSON.stringify(result));
-          } catch (_e) {
-            /* ignore */
-          }
-          return result;
-        });
+      if (!res.ok || !data.success || !Array.isArray(data.orders)) {
+        setUpdateFailed(true);
+        return;
       }
+      const mapped: PendingOrderRecord[] = data.orders.map((o: Record<string, unknown>) => ({
+        id: String(o["id"] || o["orderId"] || ""),
+        orderNumber: String(o["orderNumber"] || o["id"] || ""),
+        customerName: String(o["buyerName"] || o["customerName"] || "Customer"),
+        customerEmail: String(o["buyerEmail"] || o["customerEmail"] || "No email provided"),
+        customerPhone: String(o["buyerPhone"] || o["customerPhone"] || ""),
+        ticketName: String(o["ticketName"] || "General Admission"),
+        quantity: Number(o["quantity"] || 1),
+        totalKes: Number(o["totalKes"] || 0),
+        ...(o["mpesaCode"] ? { mpesaCode: String(o["mpesaCode"]) } : {}),
+        ...(o["mpesaMessage"] ? { mpesaMessage: String(o["mpesaMessage"]) } : {}),
+        status: String(o["status"] || "pending") as PendingOrderRecord["status"],
+        createdAt: String(o["createdAt"] || new Date().toISOString()),
+        ...(o["updatedAt"] ? { updatedAt: String(o["updatedAt"]) } : {}),
+        ...(o["rejectionReason"] ? { rejectionReason: String(o["rejectionReason"]) } : {}),
+        ...(o["approvedBy"] ? { approvedBy: String(o["approvedBy"]) } : {}),
+      }));
+      setOrders(() => {
+        const result = mapped.filter(
+          (o) =>
+            (o.status === "pending_approval" || o.status === "pending") &&
+            !approvedOrderIdsRef.current.has(o.id) &&
+            !approvedOrderIdsRef.current.has(o.orderNumber),
+        );
+        try {
+          localStorage.setItem("rift_admin_pending_orders_cache", JSON.stringify(result));
+        } catch (_e) {
+          /* ignore */
+        }
+        return result;
+      });
+      setUpdateFailed(false);
+      setLastUpdatedAt(formatHHMM(new Date()));
     } catch (err) {
       console.warn("Failed to fetch pending orders from API:", err);
+      setUpdateFailed(true);
     } finally {
       setLoading(false);
     }
   };
 
-  // Real-time Firestore subscription + API initial fetch
+  // Poll pending orders every 60 seconds while page is visible
   useEffect(() => {
-    fetchPendingOrders();
+    void fetchPendingOrders();
 
-    // Listen to real-time updates from Firestore
-    const unsubscribe = subscribeToPendingOrders((firestoreOrders) => {
-      if (Array.isArray(firestoreOrders)) {
-        if (firestoreOrders.length === 0) {
-          // If Firestore reports 0 pending orders, update state
-          setOrders((prev) => {
-            const serverRemaining = prev.filter(
-              (o) =>
-                !approvedOrderIdsRef.current.has(o.id) &&
-                !approvedOrderIdsRef.current.has(o.orderNumber),
-            );
-            return serverRemaining;
-          });
-          return;
-        }
-
-        setOrders((prev) => {
-          const map = new Map<string, PendingOrderRecord>();
-          // Add previously known orders that are not approved
-          prev.forEach((o) => {
-            if (
-              !approvedOrderIdsRef.current.has(o.id) &&
-              !approvedOrderIdsRef.current.has(o.orderNumber)
-            ) {
-              map.set(o.id, o);
-            }
-          });
-
-          for (const fo of firestoreOrders) {
-            if (
-              approvedOrderIdsRef.current.has(fo.orderId) ||
-              approvedOrderIdsRef.current.has(fo.orderNumber || "") ||
-              (fo.status !== "pending_approval" && fo.status !== "pending")
-            ) {
-              map.delete(fo.orderId);
-              continue;
-            }
-
-            const item: PendingOrderRecord = {
-              id: fo.orderId,
-              orderNumber: fo.orderNumber || fo.orderId,
-              customerName: fo.customerName || "Customer",
-              customerEmail: fo.customerEmail || "",
-              customerPhone: fo.customerPhone || "",
-              ticketName: fo.ticketName || "General Admission",
-              quantity: fo.quantity || 1,
-              totalKes: fo.totalKes || 0,
-              ...(fo.mpesaCode ? { mpesaCode: fo.mpesaCode } : {}),
-              ...(fo.mpesaMessage ? { mpesaMessage: fo.mpesaMessage } : {}),
-              status: fo.status,
-              createdAt: fo.createdAt || new Date().toISOString(),
-              ...(fo.updatedAt ? { updatedAt: fo.updatedAt } : {}),
-              ...(fo.rejectionReason ? { rejectionReason: fo.rejectionReason } : {}),
-              ...(fo.approvedBy ? { approvedBy: fo.approvedBy } : {}),
-            };
-            map.set(fo.orderId, item);
-          }
-
-          const filtered = Array.from(map.values()).filter(
-            (o) =>
-              (o.status === "pending_approval" || o.status === "pending") &&
-              !approvedOrderIdsRef.current.has(o.id) &&
-              !approvedOrderIdsRef.current.has(o.orderNumber),
-          );
-          try {
-            localStorage.setItem("rift_admin_pending_orders_cache", JSON.stringify(filtered));
-          } catch (_e) {
-            /* ignore */
-          }
-          return filtered;
-        });
+    const interval = window.setInterval(() => {
+      if (typeof document === "undefined" || document.visibilityState === "visible") {
+        void fetchPendingOrders();
       }
-    });
+    }, 60_000);
 
     return () => {
-      if (unsubscribe) unsubscribe();
+      window.clearInterval(interval);
     };
   }, []);
 
@@ -323,27 +262,6 @@ export function ManualVerificationTab() {
         return;
       }
 
-      // Also update in Firestore to keep database sync seamless (non-blocking)
-      approveOrderInFirestore({
-        orderId: selectedOrder.id,
-        adminEmail: user?.email || "admin@verve.co.ke",
-        tickets: (data.tickets || []).map((t: Record<string, unknown>) => ({
-          ticketNumber: String(t["ticketNumber"] || ""),
-          orderId: selectedOrder.id,
-          orderNumber: selectedOrder.orderNumber,
-          attendeeName: selectedOrder.customerName,
-          attendeeEmail: selectedOrder.customerEmail,
-          buyerPhone: selectedOrder.customerPhone,
-          tierName: selectedOrder.ticketName,
-          admitsCount: Number(t["admitsCount"] || 1),
-          priceKes: Number(t["priceKes"] || selectedOrder.totalKes),
-          qrHash: String(t["qrHash"] || ""),
-          status: "valid",
-        })),
-      }).catch((fErr) => {
-        console.warn("Firestore background sync note on approve:", fErr);
-      });
-
       // Permanently mark order ID and order number in session ref
       approvedOrderIdsRef.current.add(selectedOrder.id);
       approvedOrderIdsRef.current.add(selectedOrder.orderNumber);
@@ -408,15 +326,6 @@ export function ManualVerificationTab() {
         return;
       }
 
-      // Update in Firestore in background
-      rejectOrderInFirestore({
-        orderId: rejectingOrder.id,
-        reason: rejectionReason,
-        adminEmail: user?.email || "admin@verve.co.ke",
-      }).catch((fErr) => {
-        console.warn("Firestore background sync note on reject:", fErr);
-      });
-
       approvedOrderIdsRef.current.add(rejectingOrder.id);
       approvedOrderIdsRef.current.add(rejectingOrder.orderNumber);
 
@@ -467,9 +376,23 @@ export function ManualVerificationTab() {
         </div>
 
         <div className="flex items-center gap-2.5">
-          <div className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-950/40 border border-emerald-500/30 rounded text-emerald-400 font-mono text-xs">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span>Manual review</span>
+          <div
+            className={`flex items-center gap-1.5 px-2.5 py-1 border rounded font-mono text-xs ${
+              updateFailed
+                ? "bg-red-950/40 border-red-500/30 text-red-300"
+                : "bg-emerald-950/40 border-emerald-500/30 text-emerald-400"
+            }`}
+          >
+            <span
+              className={`w-2 h-2 rounded-full ${
+                updateFailed ? "bg-red-400" : "bg-emerald-400"
+              }`}
+            />
+            <span>
+              {updateFailed
+                ? "Update failed. Click Refresh"
+                : `Last updated ${lastUpdatedAt || "--:--"}`}
+            </span>
           </div>
 
           <Button

@@ -38,19 +38,19 @@ export interface PaymentStatusCardProps {
   orderNumber: string;
   buyerName: string;
   buyerPhone: string;
-  buyerEmail?: string;
+  buyerEmail?: string | undefined;
   ticketName: string;
   quantity: number;
   totalKes: number;
   paymentPhase: PaymentPhase;
-  paymentError?: string | null;
-  mpesaReceipt?: string | null;
-  firstTicketCode?: string | null;
-  secondsRemaining?: number;
-  isSubmittingCode?: boolean;
+  paymentError?: string | null | undefined;
+  mpesaReceipt?: string | null | undefined;
+  firstTicketCode?: string | null | undefined;
+  secondsRemaining?: number | undefined;
+  isSubmittingCode?: boolean | undefined;
   onSubmitMpesaCode: (code: string, rawMessage?: string, email?: string) => Promise<void>;
-  onCheckStatusAgain?: () => void;
-  onCancelReservation?: () => void;
+  onCheckStatusAgain?: (() => void) | undefined;
+  onCancelReservation?: (() => void) | undefined;
 }
 
 export const PaymentStatusCard: React.FC<PaymentStatusCardProps> = ({
@@ -89,7 +89,7 @@ export const PaymentStatusCard: React.FC<PaymentStatusCardProps> = ({
   const extractedCode = useMemo(() => {
     if (!rawMpesaInput.trim()) return null;
     const match = rawMpesaInput.match(/\b([A-Z0-9]{10})\b/i);
-    return match ? match[1].toUpperCase() : null;
+    return match?.[1] ? match[1].toUpperCase() : null;
   }, [rawMpesaInput]);
 
   const handleSubmit = async (e?: React.FormEvent) => {
@@ -139,7 +139,11 @@ export const PaymentStatusCard: React.FC<PaymentStatusCardProps> = ({
   return (
     <div className="space-y-6" id="payment-status-container">
       {/* Reservation Expiry Timer Warning if active */}
-      {secondsRemaining !== undefined && secondsRemaining > 0 && paymentPhase !== "paid" && (
+      {secondsRemaining !== undefined &&
+        secondsRemaining > 0 &&
+        paymentPhase !== "paid" &&
+        paymentPhase !== "pending_approval" &&
+        paymentPhase !== "review" && (
         <div className="flex items-center justify-between border border-amber-500/30 bg-amber-950/20 px-4 py-3 text-xs text-amber-200">
           <div className="flex items-center gap-2">
             <Clock3 className="size-4 text-amber-400 shrink-0" />
@@ -465,8 +469,7 @@ export const PaymentStatusCard: React.FC<PaymentStatusCardProps> = ({
                     Awaiting organizer review
                   </strong>
                   <span>
-                    A submitted M-Pesa message is a payment claim, not confirmation. The organizer
-                    reviews it, and a ticket is issued only after approval.
+                    Payment received and awaiting verification. Tickets are issued within 24 hours.
                   </span>
                 </div>
               </div>
@@ -574,7 +577,7 @@ export const PaymentStatusCard: React.FC<PaymentStatusCardProps> = ({
               <h2 className="text-2xl font-display text-bone">RESERVATION EXPIRED</h2>
               <p className="text-sm text-bone-muted">
                 {paymentError ||
-                  "The 10-minute inventory reservation window has expired. Please select your passes again to complete your booking."}
+                  "The 30-minute inventory reservation window has expired. Please select your passes again to complete your booking."}
               </p>
             </div>
           </div>

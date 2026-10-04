@@ -249,7 +249,14 @@ function Checkout() {
 
   // Synchronize reservation countdown timer
   useEffect(() => {
-    if (step !== "payment" || !activeOrder || paymentPhase === "paid") return;
+    if (
+      step !== "payment" ||
+      !activeOrder ||
+      paymentPhase === "paid" ||
+      paymentPhase === "pending_approval" ||
+      activeOrder.status === "pending_approval"
+    )
+      return;
 
     const interval = setInterval(() => {
       const targetTime = new Date(activeOrder.expiresAt).getTime();
@@ -654,7 +661,7 @@ function Checkout() {
               <div>
                 <h1 className="font-display text-4xl text-bone sm:text-5xl">Choose your ticket</h1>
                 <p className="mt-2 text-muted-foreground">
-                  Select your preferred tier. Ticket quantity is reserved for 10 minutes upon
+                  Select your preferred tier. Ticket quantity is reserved for 30 minutes upon
                   proceeding.
                 </p>
 
@@ -875,7 +882,7 @@ function Checkout() {
                     <ShieldCheck className="mr-2 inline size-4 text-lavender" />
                     Upon clicking reserve, your {quantity} {choice.name}{" "}
                     {choice.admitsCount > 1 ? "bundle" : "pass"} will be locked in the inventory
-                    engine for exactly 10 minutes.
+                    engine for 30 minutes.
                   </div>
 
                   {/* DATA PROTECTION & TERMS CONSENT */}
@@ -1513,7 +1520,7 @@ function Checkout() {
                   Your reservation expired
                 </h1>
                 <p className="mx-auto mt-4 max-w-md text-base text-muted-foreground">
-                  The 10-minute hold on your selected tickets has elapsed. Reserved inventory has
+                  The 30-minute hold on your selected tickets has elapsed. Reserved inventory has
                   been automatically returned to the pool to allow other attendees to purchase.
                 </p>
                 <div className="mt-8">

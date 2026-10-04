@@ -4,8 +4,8 @@ import type { OrderStatus, ReservationStatus } from "../lib/database.types";
 import { ManualOrderStore } from "./manual-order-store";
 import { PaymentOperationsStore } from "./payment-operations-store";
 
-// Reservation Time-To-Live in milliseconds (10 minutes)
-export const RESERVATION_TTL_MS = 10 * 60 * 1000;
+// Reservation Time-To-Live in milliseconds (30 minutes)
+export const RESERVATION_TTL_MS = 30 * 60 * 1000;
 
 // Technical request safety ceiling: protects against integer overflow / spam attacks
 // This is NOT an organizer business rule and is strictly distinguished from ticket.purchaseLimit
@@ -93,6 +93,7 @@ export interface StoredOrder {
   mpesaMessage?: string;
   paymentReference?: string | undefined;
   rejectionReason?: string;
+  cancellationReason?: "hold_expired" | "buyer_cancelled";
   approvedBy?: string;
   approvedAt?: string;
   expiresAt: string;
@@ -451,7 +452,7 @@ export class OrderService {
   }
 
   /**
-   * Create an order with an atomic 10-minute inventory reservation
+   * Create an order with an atomic 30-minute inventory reservation
    */
   static async createOrder(
     input: CreateOrderInput,
@@ -658,13 +659,16 @@ export class OrderService {
     }
 
     // Server-authoritative expiration check based strictly on server timestamp
+    // Orders in pending_approval never expire regardless of expires_at
     const now = Date.now();
     const isExpired =
-      order.status === "cancelled" ||
-      (order.status === "pending" && new Date(order.expiresAt).getTime() < now);
+      order.status !== "pending_approval" &&
+      (order.status === "cancelled" ||
+        (order.status === "pending" && new Date(order.expiresAt).getTime() < now));
 
     if (isExpired && order.status === "pending") {
       order.status = "cancelled";
+      order.cancellationReason = "hold_expired";
       order.updatedAt = new Date().toISOString();
       const saved = await ManualOrderStore.updateOrderAndReservation(order, ["pending"]);
       if (saved) Object.assign(order, saved);
@@ -709,7 +713,39 @@ export class OrderService {
       };
     }
 
-    if (order.status !== "pending" && order.status !== "pending_approval") {
+    const now = Date.now();
+    const expiresAtMs = new Date(order.expiresAt).getTime();
+    const updatedAtMs = new Date(order.updatedAt).getTime();
+    const HOLD_REVIVAL_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+    // Never revive an order that an admin rejected or a buyer cancelled
+    const isAdminRejected = order.status === "rejected";
+    const isBuyerCancelled =
+      order.status === "cancelled" &&
+      (order.cancellationReason === "buyer_cancelled" ||
+        (!order.cancellationReason && Number.isFinite(updatedAtMs) && updatedAtMs < expiresAtMs));
+
+    if (isAdminRejected || isBuyerCancelled) {
+      return {
+        success: false,
+        code: "INVALID_ORDER_STATUS",
+        message: "This order is not accepting payment references.",
+      };
+    }
+
+    const isHoldExpiredWithin24h =
+      Number.isFinite(expiresAtMs) &&
+      expiresAtMs <= now &&
+      now - expiresAtMs <= HOLD_REVIVAL_WINDOW_MS &&
+      ((order.status === "cancelled" &&
+        (order.cancellationReason === "hold_expired" ||
+          (!order.cancellationReason && updatedAtMs >= expiresAtMs))) ||
+        order.status === "pending");
+
+    const isActivePending =
+      (order.status === "pending" && expiresAtMs > now) || order.status === "pending_approval";
+
+    if (!isActivePending && !isHoldExpiredWithin24h) {
       return {
         success: false,
         code: "INVALID_ORDER_STATUS",
@@ -719,24 +755,47 @@ export class OrderService {
 
     order.mpesaCode = sanitizedCode;
     if (mpesaMessage) order.mpesaMessage = mpesaMessage.trim();
-
+    delete order.cancellationReason;
     order.status = "pending_approval";
     order.updatedAt = new Date().toISOString();
 
     // Keep the reservation alive while under admin verification (extend 48 hours for generous 24hr manual review SLA)
     order.expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
-    const updated = await ManualOrderStore.updateOrderAndReservation(order, [
-      "pending",
-      "pending_approval",
-    ]);
-    if (!updated) {
-      return {
-        success: false,
-        code: "INVALID_ORDER_STATUS",
-        message: "This order is no longer accepting payment references.",
-      };
+
+    if (isHoldExpiredWithin24h) {
+      const ticketConfig = this.getTicketType(order.ticketTypeId);
+      const admitsCount = ticketConfig?.admitsCount ?? order.admitsCount ?? 1;
+      const revived = await ManualOrderStore.reviveOrderToPendingApproval(order, admitsCount);
+      if (revived.inventoryError) {
+        return {
+          success: false,
+          code: "INSUFFICIENT_INVENTORY",
+          message:
+            "Your hold expired and the event is now full. Contact the organizer with your M-Pesa code.",
+        };
+      }
+      if (!revived.order) {
+        return {
+          success: false,
+          code: "INVALID_ORDER_STATUS",
+          message: "This order is no longer accepting payment references.",
+        };
+      }
+      order = revived.order;
+    } else {
+      const updated = await ManualOrderStore.updateOrderAndReservation(order, [
+        "pending",
+        "pending_approval",
+      ]);
+      if (!updated) {
+        return {
+          success: false,
+          code: "INVALID_ORDER_STATUS",
+          message: "This order is no longer accepting payment references.",
+        };
+      }
+      order = updated;
     }
-    order = updated;
 
     return {
       success: true,
@@ -917,9 +976,27 @@ export class OrderService {
       return { success: false, code: "UNAUTHORIZED", message: "Invalid authorization token." };
     }
 
+    // Check if already cancelled
+    if (order.status === "cancelled") {
+      return {
+        success: false,
+        code: "ALREADY_CANCELLED",
+        message: "Order has already been cancelled.",
+      };
+    }
+
+    if (order.status !== "pending") {
+      return {
+        success: false,
+        code: "INVALID_ORDER_STATUS",
+        message: "Only unpaid pending reservations can be cancelled.",
+      };
+    }
+
     // Check if expired
     if (new Date(order.expiresAt).getTime() < Date.now()) {
       order.status = "cancelled";
+      order.cancellationReason = "hold_expired";
       order.updatedAt = new Date().toISOString();
       await ManualOrderStore.updateOrderAndReservation(order, ["pending"]);
 
@@ -930,16 +1007,8 @@ export class OrderService {
       };
     }
 
-    // Check if already cancelled
-    if (order.status === "cancelled") {
-      return {
-        success: false,
-        code: "ALREADY_CANCELLED",
-        message: "Order has already been cancelled.",
-      };
-    }
-
     order.status = "cancelled";
+    order.cancellationReason = "buyer_cancelled";
     order.updatedAt = new Date().toISOString();
     await ManualOrderStore.updateOrderAndReservation(order, ["pending"]);
 

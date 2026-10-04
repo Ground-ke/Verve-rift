@@ -8,7 +8,7 @@ import {
 } from "./order-service";
 import type { DigitalTicketRecord, PaymentTransactionRecord } from "./tickets.server";
 
-function getEventCapacity(): number {
+export function getEventCapacity(): number {
   const raw = process.env["EVENT_CAPACITY"];
   if (raw !== undefined && raw.trim() !== "") {
     const parsed = Number(raw);
@@ -45,6 +45,28 @@ function orderFromRow(row: { data: StoredOrder }): StoredOrder {
 }
 
 export class ManualOrderStore {
+  static async getCommittedPeople(
+    queryable: Pick<PoolClient, "query"> = getSharedPool(),
+  ): Promise<number> {
+    const counts = await queryable.query<{ ticket_type_id: string; quantity: string }>(
+      `SELECT ticket_type_id, COALESCE(SUM(quantity), 0)::text AS quantity
+       FROM public.manual_ticket_orders
+       WHERE status IN ('approved', 'paid', 'completed')
+          OR status = 'pending_approval'
+          OR (status = 'pending' AND expires_at > NOW())
+       GROUP BY ticket_type_id`,
+    );
+
+    let committed = 0;
+    for (const row of counts.rows) {
+      const tierConfig = OrderService.getTicketType(row.ticket_type_id);
+      if (tierConfig) {
+        committed += Number(row.quantity || 0) * tierConfig.admitsCount;
+      }
+    }
+    return committed;
+  }
+
   static async createOrder(
     order: StoredOrder,
     reservation: StoredReservation,
@@ -71,23 +93,7 @@ export class ManualOrderStore {
 
       await client.query("SELECT pg_advisory_xact_lock(hashtext('event_capacity'))");
 
-      const counts = await client.query<{ ticket_type_id: string; quantity: string }>(
-        `SELECT ticket_type_id, COALESCE(SUM(quantity), 0)::text AS quantity
-         FROM public.manual_ticket_orders
-         WHERE status IN ('approved', 'paid', 'completed')
-            OR status = 'pending_approval'
-            OR (status = 'pending' AND expires_at > NOW())
-         GROUP BY ticket_type_id`,
-      );
-
-      let committed = 0;
-      for (const row of counts.rows) {
-        const tierConfig = OrderService.getTicketType(row.ticket_type_id);
-        if (tierConfig) {
-          committed += Number(row.quantity || 0) * tierConfig.admitsCount;
-        }
-      }
-
+      const committed = await ManualOrderStore.getCommittedPeople(client);
       const capacity = getEventCapacity();
       if (committed + order.quantity * ticket.admitsCount > capacity) {
         return { order, conflict: false, inventoryError: true };
@@ -183,7 +189,7 @@ export class ManualOrderStore {
       await client.query(
         `UPDATE public.manual_ticket_reservations
          SET expires_at = $2, status = $3, updated_at = NOW()
-         WHERE order_id = $1 AND status = 'active'`,
+         WHERE order_id = $1 AND status IN ('active', 'released', 'expired')`,
         [
           order.id,
           order.expiresAt,
@@ -195,6 +201,67 @@ export class ManualOrderStore {
         ],
       );
       return result.rows[0].data;
+    });
+  }
+
+  static async reviveOrderToPendingApproval(
+    order: StoredOrder,
+    admitsCount: number,
+  ): Promise<{ order?: StoredOrder; inventoryError: boolean }> {
+    return withTransaction(async (client) => {
+      await client.query("SELECT pg_advisory_xact_lock(hashtext('event_capacity'))");
+
+      const committed = await ManualOrderStore.getCommittedPeople(client);
+      const capacity = getEventCapacity();
+      if (committed + order.quantity * admitsCount > capacity) {
+        if (order.status === "pending") {
+          const expiredOrder: StoredOrder = {
+            ...order,
+            status: "cancelled",
+            cancellationReason: "hold_expired",
+            updatedAt: new Date().toISOString(),
+          };
+          await client.query(
+            `UPDATE public.manual_ticket_orders
+             SET status = 'cancelled', data = $2::jsonb, updated_at = NOW()
+             WHERE id = $1 AND status = 'pending'`,
+            [order.id, JSON.stringify(expiredOrder)],
+          );
+          await client.query(
+            `UPDATE public.manual_ticket_reservations
+             SET status = 'released', updated_at = NOW()
+             WHERE order_id = $1 AND status = 'active'`,
+            [order.id],
+          );
+        }
+        return { inventoryError: true };
+      }
+
+      const result = await client.query<{ data: StoredOrder }>(
+        `UPDATE public.manual_ticket_orders
+         SET status = $2, expires_at = $3, mpesa_code = $4, data = $5::jsonb, updated_at = NOW()
+         WHERE id = $1 AND status = ANY($6::text[]) RETURNING data`,
+        [
+          order.id,
+          order.status,
+          order.expiresAt,
+          order.mpesaCode || null,
+          JSON.stringify(order),
+          ["cancelled", "pending"],
+        ],
+      );
+      if (!result.rows[0]) {
+        return { inventoryError: false };
+      }
+
+      await client.query(
+        `UPDATE public.manual_ticket_reservations
+         SET expires_at = $2, status = 'active', updated_at = NOW()
+         WHERE order_id = $1`,
+        [order.id, order.expiresAt],
+      );
+
+      return { order: result.rows[0].data, inventoryError: false };
     });
   }
 

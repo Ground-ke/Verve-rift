@@ -38,13 +38,21 @@ async function checkDatabaseReachable(): Promise<boolean> {
     const queryPromise = getSharedPool()
       .query("select 1")
       .then(() => true);
-    const timeoutPromise = new Promise<boolean>((resolve) => {
-      timer = setTimeout(() => resolve(false), 3000);
+    const timeoutPromise = new Promise<boolean>((_, reject) => {
+      timer = setTimeout(
+        () => reject(Object.assign(new Error("Database health check timed out"), { code: "ETIMEDOUT" })),
+        3000,
+      );
     });
     const reachable = await Promise.race([queryPromise, timeoutPromise]);
     dbReachableCache = { value: reachable, expiresAt: Date.now() + 30_000 };
     return reachable;
-  } catch {
+  } catch (error) {
+    const pgError = error as { code?: unknown; message?: unknown };
+    console.error("[HealthCheck] checkDatabaseReachable failed:", {
+      code: pgError?.code,
+      message: pgError?.message,
+    });
     dbReachableCache = { value: false, expiresAt: Date.now() + 30_000 };
     return false;
   } finally {
@@ -304,7 +312,13 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       });
 
       if (!result.success || !result.order) {
-        return json(result, result.code === "NOT_FOUND" ? 404 : 400);
+        const status =
+          result.code === "NOT_FOUND"
+            ? 404
+            : result.code === "INSUFFICIENT_INVENTORY"
+              ? 409
+              : 400;
+        return json(result, status);
       }
 
       const order = result.order;
@@ -731,110 +745,22 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     // 12d. POST /api/admin/ticket-tiers/update (Organizer Changes Tier Price & Limits)
     // --------------------------------------------------------------------------
     if (pathname === "/api/admin/ticket-tiers/update" && method === "POST") {
-      let body: Record<string, unknown>;
-      try {
-        body = (await request.json()) as Record<string, unknown>;
-      } catch {
-        return errorJson("Invalid JSON request body.", "INVALID_JSON", 400);
-      }
-
-      const slug = String(body["slug"] || "").trim();
-      if (!slug) {
-        return errorJson("Tier slug is required.", "INVALID_INPUT", 400);
-      }
-
-      const result = OrderService.updateTicketType(slug, {
-        name: body["name"] !== undefined ? String(body["name"]) : undefined,
-        priceKes: body["priceKes"] !== undefined ? Number(body["priceKes"]) : undefined,
-        admitsCount: body["admitsCount"] !== undefined ? Number(body["admitsCount"]) : undefined,
-        totalInventory:
-          body["totalInventory"] !== undefined
-            ? body["totalInventory"] === null
-              ? null
-              : Number(body["totalInventory"])
-            : undefined,
-        active: body["active"] !== undefined ? Boolean(body["active"]) : undefined,
-      });
-
-      if (!result.success || !result.tier) {
-        return errorJson(result.message || "Failed to update ticket tier.", "NOT_FOUND", 404);
-      }
-
-      const actorEmail = String(body["actor_email"] || body["actorEmail"] || "admin@verve.co.ke");
-      await AdminServerService.recordAuditLog({
-        actorEmail,
-        action: "ticket_tier.updated",
-        targetTable: "ticket_tiers",
-        targetId: slug,
-        metadata: {
-          slug,
-          newPriceKes: result.tier.priceKes,
-          name: result.tier.name,
-          active: result.tier.active,
-        },
-      });
-
-      return json({
-        success: true,
-        message: `Ticket tier '${result.tier.name}' updated successfully.`,
-        tier: result.tier,
-      });
+      return errorJson(
+        "Ticket prices are set in code and cannot be edited here.",
+        "FORBIDDEN",
+        403,
+      );
     }
 
     // --------------------------------------------------------------------------
     // 12e. POST /api/admin/ticket-tiers/create (Add New Ticket Tier)
     // --------------------------------------------------------------------------
     if (pathname === "/api/admin/ticket-tiers/create" && method === "POST") {
-      let body: Record<string, unknown>;
-      try {
-        body = (await request.json()) as Record<string, unknown>;
-      } catch {
-        return errorJson("Invalid JSON request body.", "INVALID_JSON", 400);
-      }
-
-      const slug = String(body["slug"] || "").trim();
-      const name = String(body["name"] || "").trim();
-      const priceKes = Number(body["priceKes"] || body["price_kes"] || 0);
-      const admitsCount = Number(body["admitsCount"] || body["admits_count"] || 1);
-      const totalInventory =
-        body["totalInventory"] !== undefined && body["totalInventory"] !== null
-          ? Number(body["totalInventory"])
-          : null;
-
-      if (!slug || !name) {
-        return errorJson("Slug and name are required for new ticket tier.", "INVALID_INPUT", 400);
-      }
-
-      const result = OrderService.createTicketType({
-        slug,
-        name,
-        priceKes,
-        admitsCount,
-        totalInventory,
-      });
-
-      if (!result.success || !result.tier) {
-        return errorJson(result.message || "Failed to create ticket tier.", "CONFLICT", 409);
-      }
-
-      const actorEmail = String(body["actor_email"] || body["actorEmail"] || "admin@verve.co.ke");
-      await AdminServerService.recordAuditLog({
-        actorEmail,
-        action: "ticket_tier.created",
-        targetTable: "ticket_tiers",
-        targetId: slug,
-        metadata: {
-          slug,
-          priceKes: result.tier.priceKes,
-          name: result.tier.name,
-        },
-      });
-
-      return json({
-        success: true,
-        message: `Ticket tier '${result.tier.name}' created successfully.`,
-        tier: result.tier,
-      });
+      return errorJson(
+        "Ticket prices are set in code and cannot be edited here.",
+        "FORBIDDEN",
+        403,
+      );
     }
 
     // --------------------------------------------------------------------------
@@ -1302,7 +1228,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     // 22. GET /api/admin/audit-logs (Audit Trail)
     // --------------------------------------------------------------------------
     if (pathname === "/api/admin/audit-logs" && method === "GET") {
-      const logs = AdminServerService.getAuditLogs();
+      const logs = await AdminServerService.getAuditLogs();
       return json({ success: true, count: logs.length, logs });
     }
 

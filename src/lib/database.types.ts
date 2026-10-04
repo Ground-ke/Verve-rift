@@ -17,7 +17,7 @@ export type PaymentStatus = "initiated" | "success" | "failed" | "timed_out";
 export type TicketStatus = "valid" | "used" | "cancelled" | "refunded";
 export type CheckinResult = "success" | "already_used" | "invalid" | "cancelled";
 
-export interface Database {
+export type Database = {
   public: {
     Tables: {
       events: {
@@ -113,6 +113,7 @@ export interface Database {
           updated_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["user_roles"]["Insert"]>;
+        Relationships: [];
       };
       orders: {
         Row: {
@@ -222,6 +223,8 @@ export interface Database {
         Row: {
           id: string;
           actor_id: string | null;
+          actor_email: string | null;
+          actor_role: string | null;
           action: string;
           target_table: string;
           target_id: string | null;
@@ -229,8 +232,30 @@ export interface Database {
           ip_address: string | null;
           created_at: string;
         };
-        Insert: Partial<Database["public"]["Tables"]["audit_logs"]["Row"]>;
-        Update: Partial<Database["public"]["Tables"]["audit_logs"]["Row"]>;
+        Insert: {
+          id?: string;
+          actor_id?: string | null;
+          actor_email?: string | null;
+          actor_role?: string | null;
+          action: string;
+          target_table: string;
+          target_id?: string | null;
+          metadata?: Json | null;
+          ip_address?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          actor_id?: string | null;
+          actor_email?: string | null;
+          actor_role?: string | null;
+          action?: string;
+          target_table?: string;
+          target_id?: string | null;
+          metadata?: Json | null;
+          ip_address?: string | null;
+          created_at?: string;
+        };
         Relationships: [];
       };
     };
@@ -267,4 +292,4 @@ export interface Database {
       };
     };
   };
-}
+};

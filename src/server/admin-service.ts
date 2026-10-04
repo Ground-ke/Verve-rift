@@ -1,6 +1,7 @@
 import { supabaseServer, isServerSupabaseConfigured } from "../lib/supabase/server";
 import { TicketsServerService, type DigitalTicketRecord } from "./tickets.server";
 import { NotificationOutbox } from "./notification-outbox";
+import { ManualOrderStore, getEventCapacity } from "./manual-order-store";
 
 export interface PromotionRecord {
   id: string;
@@ -84,10 +85,12 @@ export class AdminServerService {
       try {
         await supabaseServer.from("audit_logs").insert({
           actor_id: log.actorId,
+          actor_email: log.actorEmail,
+          actor_role: log.actorRole,
           action: log.action,
           target_table: log.targetTable,
           target_id: log.targetId,
-          metadata: log.metadata,
+          metadata: log.metadata as Record<string, never>,
           ip_address: log.ipAddress,
         });
       } catch (err) {
@@ -101,15 +104,55 @@ export class AdminServerService {
   /**
    * Get all Audit Logs
    */
-  static getAuditLogs(limit = 100): AuditLogEntry[] {
-    return auditLogsStore.slice(0, limit);
+  static async getAuditLogs(limit = 200): Promise<AuditLogEntry[]> {
+    const safeLimit = Math.min(Math.max(1, limit), 200);
+    if (isServerSupabaseConfigured && supabaseServer) {
+      try {
+        const { data, error } = await supabaseServer
+          .from("audit_logs")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(safeLimit);
+
+        if (error) {
+          throw error;
+        }
+
+        return (data ?? []).map((row) => ({
+          id: String(row.id),
+          actorId: row.actor_id || "admin-system",
+          actorEmail: row.actor_email || "admin@verve.co.ke",
+          actorRole:
+            row.actor_role === "scanner" || row.actor_role === "system"
+              ? row.actor_role
+              : "admin",
+          action: row.action,
+          targetTable: row.target_table,
+          targetId: row.target_id || "",
+          metadata:
+            row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+              ? (row.metadata as Record<string, unknown>)
+              : {},
+          ipAddress: row.ip_address || "127.0.0.1",
+          createdAt: row.created_at,
+        }));
+      } catch (err) {
+        console.warn("Could not read audit logs from Supabase, falling back to in-memory store:", err);
+        return auditLogsStore.slice(0, safeLimit);
+      }
+    }
+
+    return auditLogsStore.slice(0, safeLimit);
   }
 
   /**
    * Get Overall Event Overview Metrics
    */
   static async getOverviewMetrics() {
-    const tickets = await TicketsServerService.getAllTickets();
+    const [tickets, committedPeople] = await Promise.all([
+      TicketsServerService.getAllTickets(),
+      ManualOrderStore.getCommittedPeople(),
+    ]);
     const promos = Array.from(promotionsStore.values());
     const scanners = Array.from(scannersStore.values());
 
@@ -122,8 +165,8 @@ export class AdminServerService {
       .filter((t) => t.status !== "cancelled")
       .reduce((sum, t) => sum + (t.priceKes || 0), 0);
 
-    const totalCapacity = 800;
-    const remainingCapacity = Math.max(0, totalCapacity - totalSold);
+    const totalCapacity = getEventCapacity();
+    const remainingCapacity = Math.max(0, totalCapacity - committedPeople);
     const checkinRate = totalSold > 0 ? Math.round((totalUsed / totalSold) * 100) : 0;
 
     return {
@@ -135,6 +178,7 @@ export class AdminServerService {
       totalValid,
       totalRevenueKes,
       totalCapacity,
+      committedPeople,
       remainingCapacity,
       checkinRate,
       activePromotionsCount: promos.filter((p) => p.isActive).length,
