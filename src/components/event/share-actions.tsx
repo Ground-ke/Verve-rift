@@ -1,4 +1,4 @@
-import { Check, Copy, Facebook, MessageCircle, Share2 } from "lucide-react";
+import { Check, Copy, Instagram, MessageCircle, Share2 } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 
@@ -34,16 +34,16 @@ export function ShareActions() {
         variant="spectral"
         size="icon"
         className="min-h-12 min-w-12"
-        aria-label="Share on Facebook"
+        aria-label="Visit on Instagram"
         onClick={() =>
           window.open(
-            `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(window.location.href)}`,
+            "https://www.instagram.com/theverveandco?utm_source=ig_web_button_share_sheet&stkn=ZDNlZDc0MzIxNw==",
             "_blank",
             "noopener,noreferrer",
           )
         }
       >
-        <Facebook />
+        <Instagram />
       </Button>
       <Button
         variant="spectral"

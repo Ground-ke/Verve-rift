@@ -24,6 +24,13 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetClose, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Countdown } from "@/components/event/countdown";
@@ -104,7 +111,7 @@ const experiences: Array<[string, string, string, LucideIcon]> = [
   [
     "02",
     "Music",
-    "A nightlife soundtrack. Line-up details will be announced by the organizers.",
+    "Guest DJs Asiti and Rane on the decks. More line-up details to be announced.",
     Volume2,
   ],
   ["03", "Costumes", "The brief is simple: arrive wickedly fabulous.", Shirt],
@@ -314,7 +321,9 @@ function NewsletterSubscribeForm() {
 
 function Index() {
   const heroRef = useRef<HTMLElement>(null);
+  const musicTileRef = useRef<HTMLElement>(null);
   const [pastHero, setPastHero] = useState(false);
+  const [lineupOpen, setLineupOpen] = useState(false);
   const [promotions, setPromotions] = useState<PublicPromotion[]>([]);
   const eventJsonLd = generateEventJsonLd();
 
@@ -443,18 +452,102 @@ function Index() {
             </p>
           </div>
           <div className="grid gap-px bg-border sm:grid-cols-2">
-            {experiences.map(([n, title, copy, Icon]) => (
-              <article className="min-h-64 bg-card p-6 sm:p-8" key={title}>
-                <div className="flex items-start justify-between">
-                  <span className="text-xs text-lavender">{n}</span>
-                  <Icon className="size-5 text-bone-muted" />
-                </div>
-                <h3 className="mt-16 text-3xl text-bone">{title}</h3>
-                <p className="mt-3 text-muted-foreground">{copy}</p>
-              </article>
-            ))}
+            {experiences.map(([n, title, copy, Icon]) =>
+              title === "Music" ? (
+                <article
+                  ref={musicTileRef}
+                  key={title}
+                  role="button"
+                  tabIndex={0}
+                  aria-haspopup="dialog"
+                  aria-expanded={lineupOpen}
+                  onClick={() => setLineupOpen(true)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setLineupOpen(true);
+                    }
+                  }}
+                  className="group relative min-h-64 cursor-pointer bg-card p-6 pb-24 sm:p-8 sm:pb-24 transition-colors hover:bg-oxblood/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                >
+                  <div className="flex items-start justify-between">
+                    <span className="text-xs text-lavender">{n}</span>
+                    <Icon className="size-5 text-bone-muted transition-colors group-hover:text-amber-400 group-focus-visible:text-amber-400" />
+                  </div>
+                  <h3 className="mt-16 text-3xl text-bone">{title}</h3>
+                  <p className="mt-3 pr-24 text-muted-foreground">{copy}</p>
+                  <div className="pointer-events-none absolute bottom-5 right-6 flex items-end">
+                    <img
+                      src="/lineup/dj-asiti-thumb.jpg"
+                      alt="Poster: Deejay Asiti, Hauntings of the Rift, 31 October 2026"
+                      width={56}
+                      height={70}
+                      loading="lazy"
+                      className="h-[70px] w-[56px] aspect-[4/5] border border-oxblood object-cover shadow-md -rotate-[4deg] opacity-75 saturate-75 brightness-90 transition-all duration-200 motion-reduce:transition-none group-hover:opacity-100 group-hover:saturate-100 group-hover:brightness-100 group-focus-visible:opacity-100 group-focus-visible:saturate-100 group-focus-visible:brightness-100 motion-safe:group-hover:-translate-x-1.5 motion-safe:group-hover:-translate-y-0.5 motion-safe:group-hover:-rotate-[7deg] motion-safe:group-focus-visible:-translate-x-1.5 motion-safe:group-focus-visible:-translate-y-0.5 motion-safe:group-focus-visible:-rotate-[7deg]"
+                    />
+                    <img
+                      src="/lineup/dj-rane-thumb.jpg"
+                      alt="Poster: Deejay Rane, Hauntings of the Rift, 31 October 2026"
+                      width={56}
+                      height={70}
+                      loading="lazy"
+                      className="-ml-3.5 h-[70px] w-[56px] aspect-[4/5] border border-oxblood object-cover shadow-md rotate-[3deg] opacity-75 saturate-75 brightness-90 transition-all duration-200 motion-reduce:transition-none group-hover:opacity-100 group-hover:saturate-100 group-hover:brightness-100 group-focus-visible:opacity-100 group-focus-visible:saturate-100 group-focus-visible:brightness-100 motion-safe:group-hover:translate-x-1.5 motion-safe:group-hover:-translate-y-0.5 motion-safe:group-hover:rotate-[6deg] motion-safe:group-focus-visible:translate-x-1.5 motion-safe:group-focus-visible:-translate-y-0.5 motion-safe:group-focus-visible:rotate-[6deg]"
+                    />
+                  </div>
+                </article>
+              ) : (
+                <article className="min-h-64 bg-card p-6 sm:p-8" key={title}>
+                  <div className="flex items-start justify-between">
+                    <span className="text-xs text-lavender">{n}</span>
+                    <Icon className="size-5 text-bone-muted" />
+                  </div>
+                  <h3 className="mt-16 text-3xl text-bone">{title}</h3>
+                  <p className="mt-3 text-muted-foreground">{copy}</p>
+                </article>
+              ),
+            )}
           </div>
         </div>
+        <Dialog open={lineupOpen} onOpenChange={setLineupOpen}>
+          <DialogContent
+            onCloseAutoFocus={(e) => {
+              e.preventDefault();
+              musicTileRef.current?.focus();
+            }}
+            className="max-h-[92vh] w-[calc(100vw-2rem)] max-w-5xl overflow-y-auto border-oxblood bg-background/95 p-4 pt-12 sm:p-6 sm:pt-12 text-bone [&>button]:border [&>button]:border-oxblood [&>button]:bg-oxblood/80 [&>button]:p-2 [&>button]:text-bone [&>button]:opacity-100 hover:[&>button]:border-amber-400 hover:[&>button]:text-amber-400"
+          >
+            <DialogHeader className="sr-only">
+              <DialogTitle>Guest DJ Lineup</DialogTitle>
+              <DialogDescription>
+                Full-size lineup posters for DJ Asiti and DJ Rane
+              </DialogDescription>
+            </DialogHeader>
+            {lineupOpen && (
+              <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 sm:items-start">
+                <figure className="flex flex-col items-center">
+                  <img
+                    src="/lineup/dj-asiti.jpg"
+                    alt="Poster: Deejay Asiti, Hauntings of the Rift, 31 October 2026"
+                    className="max-h-[80vh] w-auto max-w-full border border-oxblood object-contain"
+                  />
+                  <figcaption className="mt-3 font-display text-2xl text-bone">
+                    DJ Asiti
+                  </figcaption>
+                </figure>
+                <figure className="flex flex-col items-center">
+                  <img
+                    src="/lineup/dj-rane.jpg"
+                    alt="Poster: Deejay Rane, Hauntings of the Rift, 31 October 2026"
+                    className="max-h-[80vh] w-auto max-w-full border border-oxblood object-contain"
+                  />
+                  <figcaption className="mt-3 font-display text-2xl text-bone">
+                    DJ Rane
+                  </figcaption>
+                </figure>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
       </section>
 
       <section
