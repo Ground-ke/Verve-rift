@@ -8,6 +8,7 @@ import { getSiteBaseUrl } from "./email.server";
 import { NotificationOutbox } from "./notification-outbox";
 import { OrderService } from "./order-service";
 import { ManualOrderStore } from "./manual-order-store";
+import { supabaseServer, isServerSupabaseConfigured } from "../lib/supabase/server";
 
 export interface DigitalTicketRecord {
   id: string;
@@ -71,6 +72,96 @@ export interface CheckInLogRecord {
 
 const checkInLogsStore: CheckInLogRecord[] = [];
 const recoveryRateLimitStore: RecoveryRateLimitRecord[] = [];
+
+interface CheckInLogDbRow {
+  id: string;
+  ticket_id: string | null;
+  ticket_code: string;
+  event_id: string;
+  scanned_by: string;
+  gate_location: string | null;
+  scan_status: "valid" | "duplicate" | "invalid";
+  scanned_at: string;
+  device_info: Record<string, unknown> | null;
+  ip_address: string | null;
+}
+
+function recordCheckInLog(params: {
+  ticketId?: string | null | undefined;
+  ticketNumber: string;
+  orderNumber: string;
+  attendeeName: string;
+  tierName: string;
+  admitsCount: number;
+  status: "valid" | "duplicate" | "invalid";
+  scannedAt: string;
+  scannedBy: string;
+  gateLocation: string;
+  eventId: string;
+  ipAddress?: string | undefined;
+}): void {
+  const logRecord: CheckInLogRecord = {
+    id: `chk_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    ticketNumber: params.ticketNumber,
+    orderNumber: params.orderNumber,
+    attendeeName: params.attendeeName,
+    tierName: params.tierName,
+    admitsCount: params.admitsCount,
+    status: params.status,
+    scannedAt: params.scannedAt,
+    scannedBy: params.scannedBy,
+    gateLocation: params.gateLocation,
+    ipAddress: params.ipAddress,
+  };
+  checkInLogsStore.unshift(logRecord);
+  if (checkInLogsStore.length > 300) checkInLogsStore.length = 300;
+
+  if (isServerSupabaseConfigured && supabaseServer) {
+    const table = (
+      supabaseServer as unknown as {
+        from: (name: string) => {
+          insert: (
+            row: Record<string, unknown>,
+          ) => PromiseLike<{ error: { code?: unknown; message?: unknown } | null }>;
+        };
+      }
+    ).from("check_in_logs");
+
+    void Promise.resolve(
+      table.insert({
+        ticket_id: params.ticketId ?? null,
+        ticket_code: params.ticketNumber,
+        event_id: params.eventId || "hauntings-of-the-rift-2026",
+        scanned_by: params.scannedBy,
+        gate_location: params.gateLocation,
+        scan_status: params.status,
+        scanned_at: params.scannedAt,
+        ip_address: params.ipAddress ?? null,
+        device_info: {
+          tierName: params.tierName,
+          admitsCount: params.admitsCount,
+          orderNumber: params.orderNumber,
+          attendeeName: params.attendeeName,
+        },
+      }),
+    )
+      .then(({ error }) => {
+        if (error) {
+          console.error("[CheckInLogs] check_in_logs insert failed:", {
+            code: error.code,
+            message: error.message,
+          });
+        }
+      })
+      .catch((err: unknown) => {
+        const pgError = err as { code?: unknown; message?: unknown };
+        console.error("[CheckInLogs] check_in_logs insert failed:", {
+          code: pgError?.code,
+          message: pgError?.message,
+        });
+      });
+  }
+}
 
 // Live ticket pass repository (populated upon order approval or direct checkout)
 export class TicketsServerService {
@@ -630,6 +721,7 @@ export class TicketsServerService {
     const {
       ticket_code,
       qr_hash,
+      event_id = "hauntings-of-the-rift-2026",
       staff_name = "Gate Security Staff",
       gate_location = "Main Gate Entrance, Top Cliff Lodge",
       clientIp,
@@ -653,8 +745,8 @@ export class TicketsServerService {
 
     // 1. Check if ticket exists in authoritative ledger
     if (!ticket) {
-      const logRecord: CheckInLogRecord = {
-        id: `chk_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      recordCheckInLog({
+        ticketId: null,
         ticketNumber: normalized,
         orderNumber: "UNKNOWN",
         attendeeName: "Unknown Guest",
@@ -664,9 +756,9 @@ export class TicketsServerService {
         scannedAt: new Date().toISOString(),
         scannedBy: staff_name,
         gateLocation: gate_location,
+        eventId: event_id,
         ipAddress: clientIp,
-      };
-      checkInLogsStore.unshift(logRecord);
+      });
 
       return {
         success: false,
@@ -679,8 +771,8 @@ export class TicketsServerService {
 
     // 2. Cryptographic HMAC Signature Verification (if hash provided)
     if (qr_hash && ticket.qrHash && qr_hash !== ticket.qrHash) {
-      const logRecord: CheckInLogRecord = {
-        id: `chk_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      recordCheckInLog({
+        ticketId: ticket.id,
         ticketNumber: ticket.ticketNumber,
         orderNumber: ticket.orderNumber,
         attendeeName: ticket.attendeeName,
@@ -690,9 +782,9 @@ export class TicketsServerService {
         scannedAt: new Date().toISOString(),
         scannedBy: staff_name,
         gateLocation: gate_location,
+        eventId: event_id,
         ipAddress: clientIp,
-      };
-      checkInLogsStore.unshift(logRecord);
+      });
 
       return {
         success: false,
@@ -705,6 +797,21 @@ export class TicketsServerService {
 
     // 3. Status checks: Refunded or Cancelled
     if (ticket.status === "cancelled" || ticket.status === "refunded") {
+      recordCheckInLog({
+        ticketId: ticket.id,
+        ticketNumber: ticket.ticketNumber,
+        orderNumber: ticket.orderNumber,
+        attendeeName: ticket.attendeeName,
+        tierName: ticket.tierName,
+        admitsCount: ticket.admitsCount,
+        status: "invalid",
+        scannedAt: new Date().toISOString(),
+        scannedBy: staff_name,
+        gateLocation: gate_location,
+        eventId: event_id,
+        ipAddress: clientIp,
+      });
+
       return {
         success: false,
         status: "invalid_pass",
@@ -717,8 +824,8 @@ export class TicketsServerService {
 
     // 4. Duplicate Check-in Guard (409 Conflict)
     if (ticket.status === "used") {
-      const logRecord: CheckInLogRecord = {
-        id: `chk_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      recordCheckInLog({
+        ticketId: ticket.id,
         ticketNumber: ticket.ticketNumber,
         orderNumber: ticket.orderNumber,
         attendeeName: ticket.attendeeName,
@@ -728,9 +835,9 @@ export class TicketsServerService {
         scannedAt: new Date().toISOString(),
         scannedBy: staff_name,
         gateLocation: gate_location,
+        eventId: event_id,
         ipAddress: clientIp,
-      };
-      checkInLogsStore.unshift(logRecord);
+      });
 
       return {
         success: false,
@@ -761,14 +868,50 @@ export class TicketsServerService {
     const updatedTicket = await ManualOrderStore.markTicketUsed(normalized, staff_name, nowIso);
     if (!updatedTicket) {
       const current = await ManualOrderStore.getTicket(normalized);
+      if (current?.status === "used") {
+        recordCheckInLog({
+          ticketId: current.id,
+          ticketNumber: current.ticketNumber,
+          orderNumber: current.orderNumber,
+          attendeeName: current.attendeeName,
+          tierName: current.tierName,
+          admitsCount: current.admitsCount,
+          status: "duplicate",
+          scannedAt: nowIso,
+          scannedBy: staff_name,
+          gateLocation: gate_location,
+          eventId: event_id,
+          ipAddress: clientIp,
+        });
+
+        return {
+          success: false,
+          status: "already_used",
+          httpStatus: 409,
+          message: `DUPLICATE TICKET: Already scanned at ${current.usedAt ? new Date(current.usedAt).toLocaleTimeString("en-KE") : "earlier"} by ${current.scannedBy || "Gate Staff"}.`,
+          ticket: current,
+          attendee: {
+            name: current.attendeeName,
+            tier: current.tierName,
+            admitsCount: current.admitsCount,
+            orderNumber: current.orderNumber,
+            issuedAt: current.issuedAt,
+            buyerPhone: current.buyerPhone,
+            priceKes: current.priceKes,
+          },
+          checkInDetails: {
+            scannedAt: current.usedAt || nowIso,
+            scannedBy: current.scannedBy || "Gate Staff",
+            gateLocation: gate_location,
+          },
+          eventStats,
+        };
+      }
       return {
         success: false,
-        status: current?.status === "used" ? "already_used" : "not_found",
-        httpStatus: current?.status === "used" ? 409 : 404,
-        message:
-          current?.status === "used"
-            ? "Ticket was checked in by another scanner."
-            : "Ticket record is unavailable.",
+        status: "not_found",
+        httpStatus: 404,
+        message: "Ticket record is unavailable.",
         ticket: current,
         eventStats,
       };
@@ -776,8 +919,8 @@ export class TicketsServerService {
     Object.assign(ticket, updatedTicket);
 
     // Record check in log
-    const logRecord: CheckInLogRecord = {
-      id: `chk_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    recordCheckInLog({
+      ticketId: ticket.id,
       ticketNumber: ticket.ticketNumber,
       orderNumber: ticket.orderNumber,
       attendeeName: ticket.attendeeName,
@@ -787,10 +930,9 @@ export class TicketsServerService {
       scannedAt: nowIso,
       scannedBy: staff_name,
       gateLocation: gate_location,
+      eventId: event_id,
       ipAddress: clientIp,
-    };
-    checkInLogsStore.unshift(logRecord);
-    if (checkInLogsStore.length > 300) checkInLogsStore.length = 300;
+    });
 
     // Recalculate event stats after successful checkin
     const updatedCheckedIn = checkedInCount + 1;
@@ -844,12 +986,89 @@ export class TicketsServerService {
     const admittedPercentage =
       totalIssued > 0 ? Math.round((checkedInCount / totalIssued) * 100) : 0;
 
+    let recentScans: CheckInLogRecord[] = checkInLogsStore.slice(0, 20);
+
+    if (isServerSupabaseConfigured && supabaseServer) {
+      try {
+        const table = (
+          supabaseServer as unknown as {
+            from: (name: string) => {
+              select: (columns: string) => {
+                order: (
+                  col: string,
+                  opts: { ascending: boolean },
+                ) => {
+                  limit: (
+                    n: number,
+                  ) => PromiseLike<{
+                    data: CheckInLogDbRow[] | null;
+                    error: { code?: unknown; message?: unknown } | null;
+                  }>;
+                };
+              };
+            };
+          }
+        ).from("check_in_logs");
+
+        const { data, error } = await table
+          .select(
+            "id, ticket_id, ticket_code, event_id, scanned_by, gate_location, scan_status, scanned_at, device_info, ip_address",
+          )
+          .order("scanned_at", { ascending: false })
+          .limit(20);
+
+        if (error) {
+          throw error;
+        }
+
+        const ticketByCode = new Map(
+          allTickets.map((t) => [t.ticketNumber.trim().toUpperCase(), t]),
+        );
+
+        recentScans = (data ?? []).map((row) => {
+          const code = String(row.ticket_code || "").trim().toUpperCase();
+          const matchedTicket = ticketByCode.get(code);
+          const info =
+            row.device_info && typeof row.device_info === "object" && !Array.isArray(row.device_info)
+              ? row.device_info
+              : {};
+          const status: "valid" | "duplicate" | "invalid" =
+            row.scan_status === "valid" || row.scan_status === "duplicate"
+              ? row.scan_status
+              : "invalid";
+
+          return {
+            id: String(row.id),
+            ticketNumber: code || String(row.ticket_code || ""),
+            orderNumber: String(info["orderNumber"] || matchedTicket?.orderNumber || "UNKNOWN"),
+            attendeeName: String(
+              info["attendeeName"] || matchedTicket?.attendeeName || "Unknown Guest",
+            ),
+            tierName: String(info["tierName"] || matchedTicket?.tierName || "Unknown Tier"),
+            admitsCount: Number(info["admitsCount"] ?? matchedTicket?.admitsCount ?? 0),
+            status,
+            scannedAt: String(row.scanned_at),
+            scannedBy: String(row.scanned_by || "Gate Security Staff"),
+            gateLocation: String(row.gate_location || "Main Entrance"),
+            ...(row.ip_address ? { ipAddress: String(row.ip_address) } : {}),
+          };
+        });
+      } catch (err: unknown) {
+        const pgError = err as { code?: unknown; message?: unknown };
+        console.error("[CheckInLogs] check_in_logs query failed, falling back to memory:", {
+          code: pgError?.code,
+          message: pgError?.message,
+        });
+        recentScans = checkInLogsStore.slice(0, 20);
+      }
+    }
+
     return {
       totalIssued,
       checkedInCount,
       remainingValid,
       admittedPercentage,
-      recentScans: checkInLogsStore.slice(0, 20),
+      recentScans,
     };
   }
 }

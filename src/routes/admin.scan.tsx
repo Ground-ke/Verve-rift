@@ -29,9 +29,22 @@ export const Route = createFileRoute("/admin/scan")({
   component: AdminScannerPage,
 });
 
+interface GateStats {
+  totalIssued: number;
+  checkedInCount: number;
+  remainingValid: number;
+  admittedPercentage: number;
+}
+
 interface ScanResultData {
   success: boolean;
-  status: "valid" | "already_used" | "invalid_signature" | "invalid_pass" | "not_found";
+  status:
+    | "valid"
+    | "already_used"
+    | "invalid_signature"
+    | "invalid_pass"
+    | "not_found"
+    | "network_error";
   httpStatus: number;
   message: string;
   ticket?: {
@@ -43,6 +56,8 @@ interface ScanResultData {
     priceKes: number;
     buyerPhone: string;
     status: string;
+    usedAt?: string | null;
+    scannedBy?: string | null;
   };
   attendee?: {
     name: string;
@@ -58,12 +73,7 @@ interface ScanResultData {
     scannedBy: string;
     gateLocation: string;
   };
-  eventStats?: {
-    totalIssued: number;
-    checkedInCount: number;
-    remainingValid: number;
-    admittedPercentage: number;
-  };
+  eventStats?: GateStats;
 }
 
 interface RecentScanItem {
@@ -76,26 +86,176 @@ interface RecentScanItem {
   scannedBy: string;
 }
 
+type CameraErrorState = "none" | "permission_denied" | "no_camera" | "other";
+
+const GENERATED_TICKET_CODE_REGEX =
+  /^HR-[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{4}-[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{4}$/;
+const LEGACY_HR_TICKET_CODE_REGEX = /^HR-[A-Z0-9]{3,8}(?:-[A-Z0-9]{2,12})+$/;
+
+const ACCEPTED_RIFT_EVENT_IDS = new Set([
+  "HALLOWEEN_RIFT_2026",
+  "HAUNTINGS-OF-THE-RIFT-2026",
+  "HAUNTINGS_OF_THE_RIFT_2026",
+]);
+
+export function isValidRiftTicketCode(code: string): boolean {
+  const normalized = code.replace(/\s+/g, "").trim().toUpperCase();
+  return (
+    GENERATED_TICKET_CODE_REGEX.test(normalized) ||
+    LEGACY_HR_TICKET_CODE_REGEX.test(normalized)
+  );
+}
+
+/**
+ * Parses a scanned or manually entered string into { code, hash } if it matches:
+ * (a) JSON {"code":...,"hash":...} (with no event field as in PDF QR, or event in ACCEPTED_RIFT_EVENT_IDS as in web QR)
+ * (b) A URL containing the ticket code with a ?h= hash (or /ticket/:code)
+ * (c) A bare Hauntings of the Rift ticket code (HR-XXXX-XXXX Base32 or legacy HR- form)
+ * Returns null if the input matches none of these formats.
+ */
+export function parseScannedTicketPayload(
+  rawInput: string,
+): { code: string; hash?: string } | null {
+  const trimmed = rawInput.trim();
+  if (!trimmed) return null;
+
+  // (a) JSON {"code":...,"hash":...}
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+    try {
+      const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return null;
+      }
+      if (typeof parsed["code"] !== "string") {
+        return null;
+      }
+      // Accept when event is omitted (PDF/image QR) or matches Hauntings of the Rift (web/email QR);
+      // reject any clearly different event field.
+      const rawEvent = parsed["event"];
+      if (rawEvent !== undefined && rawEvent !== null && rawEvent !== "") {
+        if (typeof rawEvent !== "string") {
+          return null;
+        }
+        const normalizedEvent = rawEvent.trim().toUpperCase();
+        if (!ACCEPTED_RIFT_EVENT_IDS.has(normalizedEvent)) {
+          return null;
+        }
+      }
+      const code = parsed["code"].replace(/\s+/g, "").trim().toUpperCase();
+      const rawHash = typeof parsed["hash"] === "string" ? parsed["hash"].trim() : "";
+      const hasValidHash = rawHash.length > 0;
+      const isRiftCode = isValidRiftTicketCode(code);
+      const isGeneralCode = /^[A-Z0-9][A-Z0-9-_]{4,49}$/.test(code);
+
+      if ((hasValidHash && isGeneralCode) || isRiftCode) {
+        return {
+          code,
+          ...(hasValidHash ? { hash: rawHash } : {}),
+        };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  // (b) URL containing the code with a ?h= hash (or /ticket/:code with ?h=)
+  if (/^https?:\/\//i.test(trimmed)) {
+    try {
+      const parsedUrl = new URL(trimmed);
+      const rawHash = (
+        parsedUrl.searchParams.get("h") ||
+        parsedUrl.searchParams.get("hash") ||
+        ""
+      ).trim();
+
+      let rawCodeSegment = "";
+      const ticketPathMatch = parsedUrl.pathname.match(/\/ticket\/([^/?#]+)/i);
+      if (ticketPathMatch?.[1]) {
+        rawCodeSegment = decodeURIComponent(ticketPathMatch[1]);
+      } else if (rawHash) {
+        const lastSegment = parsedUrl.pathname.split("/").filter(Boolean).pop() || "";
+        if (lastSegment && lastSegment.toLowerCase() !== "ticket") {
+          rawCodeSegment = decodeURIComponent(lastSegment);
+        } else {
+          rawCodeSegment =
+            parsedUrl.searchParams.get("code") || parsedUrl.searchParams.get("ticket") || "";
+        }
+      }
+
+      const code = rawCodeSegment.replace(/\s+/g, "").trim().toUpperCase();
+      if (!code || !/^[A-Z0-9][A-Z0-9-_]{4,49}$/.test(code)) {
+        return null;
+      }
+      if (rawHash.length > 0 || isValidRiftTicketCode(code)) {
+        return {
+          code,
+          ...(rawHash ? { hash: rawHash } : {}),
+        };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  // (c) Bare ticket code (generated HR-XXXX-XXXX Base32 or legacy HR- form)
+  const bareCode = trimmed.replace(/\s+/g, "").toUpperCase();
+  if (isValidRiftTicketCode(bareCode)) {
+    return { code: bareCode };
+  }
+
+  return null;
+}
+
+function classifyCameraError(err: unknown): CameraErrorState {
+  const name =
+    typeof err === "object" && err !== null && "name" in err ? String(err.name) : "";
+  const message =
+    err instanceof Error ? err.message : typeof err === "string" ? err : String(err ?? "");
+  const combined = `${name} ${message}`.toLowerCase();
+
+  if (
+    combined.includes("notallowederror") ||
+    combined.includes("permissiondenied") ||
+    combined.includes("permission denied") ||
+    combined.includes("permission dismissed") ||
+    combined.includes("not allowed") ||
+    combined.includes("denied")
+  ) {
+    return "permission_denied";
+  }
+
+  if (
+    combined.includes("notfounderror") ||
+    combined.includes("devicesnotfound") ||
+    combined.includes("requested device not found") ||
+    combined.includes("no camera") ||
+    combined.includes("device_not_found") ||
+    combined.includes("overconstrainederror")
+  ) {
+    return "no_camera";
+  }
+
+  return "other";
+}
+
 export function AdminScannerPage() {
   const [activeTab, setActiveTab] = useState<"camera" | "manual">("camera");
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraFacing, setCameraFacing] = useState<"environment" | "user">("environment");
+  const [cameraError, setCameraError] = useState<CameraErrorState>("none");
   const [torchOn, setTorchOn] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
-  const [scannerReady, setScannerReady] = useState(false);
+  const [, setScannerReady] = useState(false);
   const [manualCode, setManualCode] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [lastScanResult, setLastScanResult] = useState<ScanResultData | null>(null);
   const [staffName, setStaffName] = useState("Gate Security Staff");
   const [gateLocation, setGateLocation] = useState("Main Top Cliff Entrance");
 
-  // Gate Checkin Live Stats
-  const [stats, setStats] = useState({
-    totalIssued: 65,
-    checkedInCount: 18,
-    remainingValid: 47,
-    admittedPercentage: 28,
-  });
+  // Gate Checkin Live Stats (null when unavailable — never invented numbers)
+  const [stats, setStats] = useState<GateStats | null>(null);
   const [recentScans, setRecentScans] = useState<RecentScanItem[]>([]);
   const [isWhatsAppSending, setIsWhatsAppSending] = useState(false);
   const [whatsAppSuccess, setWhatsAppSuccess] = useState<string | null>(null);
@@ -103,30 +263,83 @@ export function AdminScannerPage() {
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const scannerElementId = "qr-reader-container";
 
-  // Fetch live stats & recent scans on mount
+  // Refs for non-stale closure access in camera frame callbacks & debouncing
+  const isProcessingRef = useRef(false);
+  const soundEnabledRef = useRef(soundEnabled);
+  soundEnabledRef.current = soundEnabled;
+  const lastDecodedRef = useRef<{ raw: string; code: string; finishedAt: number }>({
+    raw: "",
+    code: "",
+    finishedAt: 0,
+  });
+  const handleScannedPayloadRef = useRef<(rawCode: string) => Promise<void>>(async () => {});
+
+  const playSafeSuccess = () => {
+    if (!soundEnabledRef.current) return;
+    try {
+      scannerAudio.playSuccessChime();
+    } catch {
+      // ignore audio error
+    }
+  };
+
+  const playSafeDuplicate = () => {
+    if (!soundEnabledRef.current) return;
+    try {
+      scannerAudio.playDuplicateTone();
+    } catch {
+      // ignore audio error
+    }
+  };
+
+  const playSafeError = () => {
+    if (!soundEnabledRef.current) return;
+    try {
+      scannerAudio.playErrorTone();
+    } catch {
+      // ignore audio error
+    }
+  };
+
+  // Fetch live stats & recent scans
   const fetchStats = async () => {
     try {
       const res = await fetch("/api/tickets/stats");
-      if (res.ok) {
-        const data = await res.json();
+      if (!res.ok) {
+        setStats(null);
+        return;
+      }
+      const data = (await res.json()) as Record<string, unknown>;
+      if (
+        typeof data["totalIssued"] === "number" &&
+        typeof data["checkedInCount"] === "number" &&
+        typeof data["remainingValid"] === "number" &&
+        typeof data["admittedPercentage"] === "number"
+      ) {
         setStats({
-          totalIssued: data.totalIssued || 65,
-          checkedInCount: data.checkedInCount || 18,
-          remainingValid: data.remainingValid || 47,
-          admittedPercentage: data.admittedPercentage || 28,
+          totalIssued: data["totalIssued"],
+          checkedInCount: data["checkedInCount"],
+          remainingValid: data["remainingValid"],
+          admittedPercentage: data["admittedPercentage"],
         });
-        if (data.recentScans) {
-          setRecentScans(data.recentScans);
-        }
+      } else {
+        setStats(null);
+      }
+      if (Array.isArray(data["recentScans"])) {
+        setRecentScans(data["recentScans"] as RecentScanItem[]);
       }
     } catch {
-      // Fallback
+      setStats(null);
     }
   };
 
   useEffect(() => {
-    fetchStats();
-    const interval = setInterval(fetchStats, 10000);
+    void fetchStats();
+    const interval = setInterval(() => {
+      if (typeof document === "undefined" || document.visibilityState === "visible") {
+        void fetchStats();
+      }
+    }, 10000);
     return () => clearInterval(interval);
   }, []);
 
@@ -139,6 +352,17 @@ export function AdminScannerPage() {
         } catch {
           // ignore
         }
+      }
+
+      if (
+        typeof navigator === "undefined" ||
+        !navigator.mediaDevices ||
+        typeof navigator.mediaDevices.getUserMedia !== "function"
+      ) {
+        setCameraActive(false);
+        setScannerReady(false);
+        setCameraError("no_camera");
+        return;
       }
 
       const html5QrCode = new Html5Qrcode(scannerElementId, {
@@ -159,7 +383,7 @@ export function AdminScannerPage() {
           aspectRatio: 1.0,
         },
         (decodedText) => {
-          handleScannedPayload(decodedText);
+          void handleScannedPayloadRef.current(decodedText);
         },
         () => {
           // Frame scan error (no QR in frame) - ignore
@@ -168,10 +392,12 @@ export function AdminScannerPage() {
 
       setCameraActive(true);
       setScannerReady(true);
+      setCameraError("none");
     } catch (err) {
       console.warn("Unable to start HTML5 camera:", err);
       setCameraActive(false);
       setScannerReady(false);
+      setCameraError(classifyCameraError(err));
     }
   };
 
@@ -212,83 +438,132 @@ export function AdminScannerPage() {
 
   // Process Scanned or Manually Submitted Ticket Code
   const handleScannedPayload = async (rawCode: string) => {
-    if (isProcessing) return;
-    setIsProcessing(true);
+    if (isProcessingRef.current) return;
 
-    // Extract ticket code or parse URL if QR payload is a full URL
-    let extractedCode = rawCode.trim();
-    let extractedHash = "";
+    const trimmedRaw = rawCode.trim();
+    if (!trimmedRaw) return;
 
-    try {
-      if (rawCode.includes("http://") || rawCode.includes("https://")) {
-        const parsedUrl = new URL(rawCode);
-        const codeInPath = parsedUrl.pathname.split("/").pop();
-        if (codeInPath && codeInPath !== "ticket") {
-          extractedCode = codeInPath;
-        }
-        extractedHash = parsedUrl.searchParams.get("h") || "";
-      }
-    } catch {
-      // Raw string format
+    const parsed = parseScannedTicketPayload(trimmedRaw);
+    const candidateCode = parsed?.code || trimmedRaw.replace(/\s+/g, "").toUpperCase();
+
+    // Ignore the same decoded code for 5 seconds after any result
+    const now = Date.now();
+    if (
+      lastDecodedRef.current.finishedAt > 0 &&
+      now - lastDecodedRef.current.finishedAt < 5000 &&
+      (lastDecodedRef.current.raw === trimmedRaw ||
+        (candidateCode && lastDecodedRef.current.code === candidateCode))
+    ) {
+      return;
     }
 
+    isProcessingRef.current = true;
+    setIsProcessing(true);
+
     try {
-      const response = await fetch("/api/tickets/validate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ticket_code: extractedCode,
-          qr_hash: extractedHash || undefined,
-          event_id: "hauntings-of-the-rift-2026",
-          staff_name: staffName,
-          gate_location: gateLocation,
-        }),
-      });
+      // Reject non-matching strings client-side without calling the server
+      if (!parsed) {
+        setLastScanResult({
+          success: false,
+          status: "invalid_pass",
+          httpStatus: 400,
+          message: "Not a Hauntings of the Rift ticket",
+        });
+        playSafeError();
+        return;
+      }
+
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), 8000);
+
+      let response: Response;
+      try {
+        response = await fetch("/api/tickets/validate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            ticket_code: parsed.code,
+            qr_hash: parsed.hash || undefined,
+            event_id: "hauntings-of-the-rift-2026",
+            staff_name: staffName,
+            gate_location: gateLocation,
+          }),
+        });
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
 
       const data = (await response.json()) as ScanResultData;
+
+      // Always update UI state BEFORE any audio/haptic playback
       setLastScanResult(data);
+      if (data.eventStats && typeof data.eventStats.totalIssued === "number") {
+        setStats(data.eventStats);
+      }
 
       if (response.ok && data.success) {
-        // Successful Admission
-        if (soundEnabled) {
-          scannerAudio.playSuccess();
-        }
+        playSafeSuccess();
       } else if (response.status === 409 || data.status === "already_used") {
-        // Duplicate / Already Used
-        if (soundEnabled) {
-          scannerAudio.playWarning();
-        }
+        playSafeDuplicate();
       } else {
-        // Invalid / Counterfeit / Revoked
-        if (soundEnabled) {
-          scannerAudio.playError();
-        }
+        playSafeError();
       }
 
-      // Refresh Stats
-      fetchStats();
+      void fetchStats();
     } catch {
-      if (soundEnabled) {
-        scannerAudio.playError();
-      }
+      // Timeout or network failure: show distinct AMBER card before playing audio
       setLastScanResult({
         success: false,
-        status: "not_found",
-        httpStatus: 500,
-        message: "Network error connecting to gate validation server.",
+        status: "network_error",
+        httpStatus: 0,
+        message:
+          "No response from the server. This ticket was NOT rejected. Check the connection and scan again. If it then says already scanned a moment ago, admit the guest.",
       });
+      playSafeDuplicate();
     } finally {
-      // Pause slightly before allowing next QR detection to prevent rapid double-scanning
-      setTimeout(() => {
+      lastDecodedRef.current = {
+        raw: trimmedRaw,
+        code: candidateCode,
+        finishedAt: Date.now(),
+      };
+      // Keep 1800ms cooldown for other codes
+      window.setTimeout(() => {
+        isProcessingRef.current = false;
         setIsProcessing(false);
       }, 1800);
     }
   };
 
+  handleScannedPayloadRef.current = handleScannedPayload;
+
   const handleManualSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!manualCode.trim()) return;
-    handleScannedPayload(manualCode);
+    const cleaned = manualCode.replace(/\s+/g, "").trim().toUpperCase();
+    if (!cleaned) return;
+    setManualCode(cleaned);
+    if (/^HRT-2026-\d{6}$/.test(cleaned)) {
+      setLastScanResult({
+        success: false,
+        status: "invalid_pass",
+        httpStatus: 400,
+        message:
+          "That is an order number. Ask the guest for the ticket code that starts with HR-, shown under TICKET CODE on the ticket, or scan the QR.",
+      });
+      playSafeError();
+      return;
+    }
+    if (!isValidRiftTicketCode(cleaned)) {
+      setLastScanResult({
+        success: false,
+        status: "invalid_pass",
+        httpStatus: 400,
+        message: "Not a Hauntings of the Rift ticket",
+      });
+      playSafeError();
+      return;
+    }
+    void handleScannedPayload(cleaned);
   };
 
   const handleSendWhatsAppNotification = async (phone: string, attendeeName: string) => {
@@ -320,16 +595,33 @@ export function AdminScannerPage() {
 
   useEffect(() => {
     if (activeTab === "camera") {
-      startCamera(cameraFacing);
+      void startCamera(cameraFacing);
     } else {
-      stopCamera();
+      void stopCamera();
     }
 
     return () => {
-      stopCamera();
+      void stopCamera();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
+
+  const isValidResult = Boolean(lastScanResult?.success && lastScanResult?.status === "valid");
+  const isDuplicateResult = lastScanResult?.status === "already_used";
+  const isNetworkErrorResult = lastScanResult?.status === "network_error";
+
+  const duplicateFirstScanAt =
+    lastScanResult?.checkInDetails?.scannedAt || lastScanResult?.ticket?.usedAt || null;
+  const duplicateScannedBy =
+    lastScanResult?.checkInDetails?.scannedBy ||
+    lastScanResult?.ticket?.scannedBy ||
+    "Gate Security Staff";
+  const duplicateBuyerName =
+    lastScanResult?.attendee?.name || lastScanResult?.ticket?.attendeeName || "Unknown Guest";
+  const duplicateTierName =
+    lastScanResult?.attendee?.tier || lastScanResult?.ticket?.tierName || "Unknown Tier";
+  const duplicateAdmitsCount =
+    lastScanResult?.attendee?.admitsCount ?? lastScanResult?.ticket?.admitsCount ?? 1;
 
   return (
     <div
@@ -371,7 +663,7 @@ export function AdminScannerPage() {
             </button>
 
             <Link
-              to="/admin/tickets"
+              to="/admin"
               className="px-4 py-2 rounded-xl text-xs font-medium bg-slate-900 hover:bg-slate-800 border border-white/10 text-slate-300 transition"
             >
               Ticket Directory
@@ -393,9 +685,11 @@ export function AdminScannerPage() {
               <span>Total Admitted</span>
               <UserCheck className="w-4 h-4 text-emerald-400" />
             </div>
-            <div className="text-2xl font-bold text-emerald-400">{stats.checkedInCount}</div>
+            <div className="text-2xl font-bold text-emerald-400">
+              {stats ? stats.checkedInCount : "—"}
+            </div>
             <div className="text-xs text-slate-400 mt-1">
-              {stats.admittedPercentage}% of sold passes
+              {stats ? `${stats.admittedPercentage}% of sold passes` : "Counts unavailable"}
             </div>
           </div>
 
@@ -404,8 +698,12 @@ export function AdminScannerPage() {
               <span>Remaining Valid</span>
               <Ticket className="w-4 h-4 text-amber-400" />
             </div>
-            <div className="text-2xl font-bold text-white">{stats.remainingValid}</div>
-            <div className="text-xs text-slate-400 mt-1">Pending arrival at gate</div>
+            <div className="text-2xl font-bold text-white">
+              {stats ? stats.remainingValid : "—"}
+            </div>
+            <div className="text-xs text-slate-400 mt-1">
+              {stats ? "Pending arrival at gate" : "Counts unavailable"}
+            </div>
           </div>
 
           <div className="bg-slate-900/60 border border-white/10 rounded-2xl p-4">
@@ -413,8 +711,10 @@ export function AdminScannerPage() {
               <span>Total Issued</span>
               <Users className="w-4 h-4 text-purple-400" />
             </div>
-            <div className="text-2xl font-bold text-white">{stats.totalIssued}</div>
-            <div className="text-xs text-slate-400 mt-1">Authorized ledger tickets</div>
+            <div className="text-2xl font-bold text-white">{stats ? stats.totalIssued : "—"}</div>
+            <div className="text-xs text-slate-400 mt-1">
+              {stats ? "Authorized ledger tickets" : "Counts unavailable"}
+            </div>
           </div>
 
           <div className="bg-slate-900/60 border border-white/10 rounded-2xl p-4">
@@ -482,16 +782,41 @@ export function AdminScannerPage() {
                     )}
 
                     {!cameraActive && (
-                      <div className="text-center p-6 space-y-3">
+                      <div className="text-center p-6 space-y-3 max-w-md">
                         <CameraOff className="w-12 h-12 text-slate-500 mx-auto" />
-                        <p className="text-sm text-slate-400">
-                          Camera preview inactive or permission required
-                        </p>
+                        {cameraError === "permission_denied" ? (
+                          <>
+                            <p className="text-sm font-semibold text-amber-300">
+                              Camera Permission Denied
+                            </p>
+                            <p className="text-xs text-slate-300 leading-relaxed">
+                              Camera access was blocked by your browser. Click the lock or site
+                              settings icon in your browser&apos;s address bar, change{" "}
+                              <span className="font-semibold text-white">Camera</span> to{" "}
+                              <span className="font-semibold text-white">Allow</span>, then reload
+                              the page or click Retry Camera below.
+                            </p>
+                          </>
+                        ) : cameraError === "no_camera" ? (
+                          <>
+                            <p className="text-sm font-semibold text-rose-300">
+                              No Camera Found on This Device
+                            </p>
+                            <p className="text-xs text-slate-300 leading-relaxed">
+                              No camera hardware was detected. Connect a camera or switch to the
+                              Manual Code Search tab to enter ticket numbers directly.
+                            </p>
+                          </>
+                        ) : (
+                          <p className="text-sm text-slate-400">Camera preview is inactive.</p>
+                        )}
                         <button
                           onClick={() => startCamera(cameraFacing)}
                           className="px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-xl text-xs font-semibold shadow-lg"
                         >
-                          Activate Camera
+                          {cameraError === "permission_denied"
+                            ? "Retry Camera"
+                            : "Activate Camera"}
                         </button>
                       </div>
                     )}
@@ -558,28 +883,30 @@ export function AdminScannerPage() {
                 <form onSubmit={handleManualSubmit} className="space-y-4 py-2">
                   <div className="space-y-2">
                     <label className="text-xs font-semibold uppercase text-slate-400 tracking-wider">
-                      Enter Ticket Pass Code or Order ID
+                      Enter Ticket Pass Code
                     </label>
                     <div className="relative">
                       <input
                         id="manual-ticket-input"
                         type="text"
                         value={manualCode}
-                        onChange={(e) => setManualCode(e.target.value.toUpperCase())}
-                        placeholder="e.g. HR-7892-4910 or HR-2026-9042"
+                        onChange={(e) =>
+                          setManualCode(e.target.value.replace(/\s+/g, "").trim().toUpperCase())
+                        }
+                        placeholder="e.g. HR-7K4M-9P2X"
                         className="w-full px-4 py-3.5 rounded-xl bg-slate-950 border border-white/10 text-white font-mono text-base tracking-wider focus:outline-none focus:ring-2 focus:ring-orange-500/50 focus:border-orange-500 uppercase"
                       />
                       <Search className="w-5 h-5 text-slate-500 absolute right-3.5 top-3.5" />
                     </div>
                     <p className="text-xs text-slate-500">
-                      Supports full ticket numbers (HR-XXXX-XXXX) or Order Confirmation numbers.
+                      Enter ticket numbers only (e.g. HR-7K4M-9P2X).
                     </p>
                   </div>
 
                   <button
                     id="submit-manual-code-btn"
                     type="submit"
-                    disabled={!manualCode.trim() || isProcessing}
+                    disabled={!manualCode.replace(/\s+/g, "").trim() || isProcessing}
                     className="w-full py-3.5 rounded-xl bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white font-semibold text-sm shadow-xl flex items-center justify-center gap-2 transition disabled:opacity-50"
                   >
                     {isProcessing ? (
@@ -626,27 +953,29 @@ export function AdminScannerPage() {
               <div
                 id="scan-result-card"
                 className={`rounded-2xl p-6 border transition-all duration-300 shadow-2xl ${
-                  lastScanResult.success && lastScanResult.status === "valid"
+                  isValidResult
                     ? "bg-emerald-950/40 border-emerald-500/50 text-emerald-100"
-                    : lastScanResult.status === "already_used"
-                      ? "bg-amber-950/40 border-amber-500/50 text-amber-100"
-                      : "bg-rose-950/40 border-rose-500/50 text-rose-100"
+                    : isNetworkErrorResult
+                      ? "bg-amber-950/60 border-2 border-amber-400/70 text-amber-100"
+                      : isDuplicateResult
+                        ? "bg-amber-950/40 border-amber-500/50 text-amber-100"
+                        : "bg-rose-950/40 border-rose-500/50 text-rose-100"
                 }`}
               >
                 {/* Result Status Header */}
                 <div className="flex items-start gap-4">
                   <div
                     className={`p-3 rounded-2xl ${
-                      lastScanResult.success && lastScanResult.status === "valid"
+                      isValidResult
                         ? "bg-emerald-500 text-black shadow-[0_0_20px_#10b981]"
-                        : lastScanResult.status === "already_used"
+                        : isNetworkErrorResult || isDuplicateResult
                           ? "bg-amber-500 text-black shadow-[0_0_20px_#f59e0b]"
                           : "bg-rose-500 text-white shadow-[0_0_20px_#ef4444]"
                     }`}
                   >
-                    {lastScanResult.success && lastScanResult.status === "valid" ? (
+                    {isValidResult ? (
                       <CheckCircle2 className="w-8 h-8" />
-                    ) : lastScanResult.status === "already_used" ? (
+                    ) : isNetworkErrorResult || isDuplicateResult ? (
                       <AlertTriangle className="w-8 h-8" />
                     ) : (
                       <AlertOctagon className="w-8 h-8" />
@@ -656,25 +985,61 @@ export function AdminScannerPage() {
                   <div className="flex-1 min-w-0">
                     <span
                       className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider mb-1 ${
-                        lastScanResult.success && lastScanResult.status === "valid"
+                        isValidResult
                           ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
-                          : lastScanResult.status === "already_used"
+                          : isNetworkErrorResult || isDuplicateResult
                             ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
                             : "bg-rose-500/20 text-rose-300 border border-rose-500/30"
                       }`}
                     >
-                      {lastScanResult.success
+                      {isValidResult
                         ? "ADMISSION GRANTED"
-                        : lastScanResult.status === "already_used"
-                          ? "DUPLICATE PASS DETECTED"
-                          : "ADMISSION REJECTED"}
+                        : isNetworkErrorResult
+                          ? "NO SERVER RESPONSE — NOT REJECTED"
+                          : isDuplicateResult
+                            ? "DUPLICATE PASS DETECTED"
+                            : "ADMISSION REJECTED"}
                     </span>
-                    <h3 className="text-lg font-bold truncate">{lastScanResult.message}</h3>
+                    <h3 className="text-base sm:text-lg font-bold leading-snug break-words">
+                      {lastScanResult.message}
+                    </h3>
                   </div>
                 </div>
 
+                {/* Prominent Duplicate Scan Details Callout */}
+                {isDuplicateResult && (
+                  <div className="mt-5 rounded-xl bg-amber-950/70 border border-amber-400/50 p-4 space-y-2.5 text-sm">
+                    <div className="flex justify-between items-center border-b border-amber-400/20 pb-2">
+                      <span className="text-amber-200/80 font-medium">First Scan Time:</span>
+                      <span className="font-mono font-bold text-amber-200 text-base">
+                        {duplicateFirstScanAt
+                          ? new Date(duplicateFirstScanAt).toLocaleTimeString("en-KE")
+                          : "Earlier scan"}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center border-b border-amber-400/20 pb-2">
+                      <span className="text-amber-200/80 font-medium">Scanned By:</span>
+                      <span className="font-bold text-white">{duplicateScannedBy}</span>
+                    </div>
+                    <div className="flex justify-between items-center border-b border-amber-400/20 pb-2">
+                      <span className="text-amber-200/80 font-medium">Buyer Name:</span>
+                      <span className="font-bold text-white text-base">{duplicateBuyerName}</span>
+                    </div>
+                    <div className="flex justify-between items-center border-b border-amber-400/20 pb-2">
+                      <span className="text-amber-200/80 font-medium">Tier:</span>
+                      <span className="font-bold text-amber-300">{duplicateTierName}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-amber-200/80 font-medium">Entry Capacity:</span>
+                      <span className="px-2.5 py-0.5 rounded-md bg-amber-500/20 border border-amber-400/40 font-mono font-bold text-amber-100">
+                        Admits {duplicateAdmitsCount}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
                 {/* Attendee Details Breakdown */}
-                {(lastScanResult.ticket || lastScanResult.attendee) && (
+                {(lastScanResult.ticket || lastScanResult.attendee) && !isDuplicateResult && (
                   <div className="mt-5 pt-4 border-t border-white/10 space-y-3 text-sm">
                     <div className="flex justify-between items-center">
                       <span className="text-slate-400">Attendee Name:</span>
@@ -693,12 +1058,23 @@ export function AdminScannerPage() {
                     <div className="flex justify-between items-center">
                       <span className="text-slate-400">Admits:</span>
                       <span className="px-2 py-0.5 rounded-md bg-white/10 font-mono font-bold text-white">
+                        Admits{" "}
                         {lastScanResult.attendee?.admitsCount ||
                           lastScanResult.ticket?.admitsCount ||
-                          1}{" "}
-                        Guest(s)
+                          1}
                       </span>
                     </div>
+
+                    {(lastScanResult.attendee?.orderNumber ||
+                      lastScanResult.ticket?.orderNumber) && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-slate-400">Order Number:</span>
+                        <span className="font-mono text-xs text-slate-300">
+                          {lastScanResult.attendee?.orderNumber ||
+                            lastScanResult.ticket?.orderNumber}
+                        </span>
+                      </div>
+                    )}
 
                     <div className="flex justify-between items-center">
                       <span className="text-slate-400">Ticket Number:</span>

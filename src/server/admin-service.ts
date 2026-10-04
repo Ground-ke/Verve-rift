@@ -283,15 +283,26 @@ export class AdminServerService {
     code: string;
     reason: string;
     actorEmail: string;
-    actorId?: string;
-    clientIp?: string;
-  }): Promise<{ success: boolean; message: string; ticket?: DigitalTicketRecord }> {
+    actorId?: string | undefined;
+    clientIp?: string | undefined;
+  }): Promise<{
+    success: boolean;
+    message: string;
+    ticket?: DigitalTicketRecord | undefined;
+  }> {
     const { code, reason, actorEmail, actorId, clientIp } = params;
     const result = await TicketsServerService.getTicketByCode(code);
     const ticket = result.ticket;
 
     if (!ticket) {
       return { success: false, message: "Ticket pass not found." };
+    }
+
+    if (ticket.status === "used") {
+      return {
+        success: false,
+        message: `Ticket pass ${ticket.ticketNumber} has already been used for gate entry and cannot be revoked.`,
+      };
     }
 
     if (ticket.status === "cancelled") {

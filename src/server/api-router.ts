@@ -726,7 +726,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     // 12b. GET /api/tickets/stats (Live Gate Check-in Stats)
     // --------------------------------------------------------------------------
     if (pathname === "/api/tickets/stats" && method === "GET") {
-      const stats = TicketsServerService.getCheckinStats();
+      const stats = await TicketsServerService.getCheckinStats();
       return json({ success: true, ...stats });
     }
 

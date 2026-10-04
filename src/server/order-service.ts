@@ -565,8 +565,9 @@ export class OrderService {
     // 11. Create Secure Reservation & Order
     const orderId = randomUUID();
     const reservationId = randomUUID();
-    const randomSuffix = Math.floor(100000 + Math.random() * 900000);
-    const orderNumber = `HRT-2026-${randomSuffix}`;
+    const generateOrderNumber = () =>
+      `HRT-2026-${Math.floor(100000 + Math.random() * 900000)}`;
+    const orderNumber = generateOrderNumber();
 
     // Generate high-entropy 256-bit cryptographic checkout session token
     const checkoutToken = `tok_${randomBytes(32).toString("hex")}`;
@@ -607,16 +608,43 @@ export class OrderService {
       updatedAt: new Date().toISOString(),
     };
 
-    let created: Awaited<ReturnType<typeof ManualOrderStore.createOrder>>;
-    try {
-      created = await ManualOrderStore.createOrder(newOrder, newReservation, ticket);
-    } catch (error) {
-      const pgError = error as { code?: unknown; message?: unknown; constraint?: unknown };
-      console.error("Failed to persist order and inventory reservation:", {
-        code: pgError?.code,
-        message: pgError?.message,
-        constraint: pgError?.constraint,
-      });
+    const MAX_ORDER_NUMBER_RETRIES = 5;
+    let created: Awaited<ReturnType<typeof ManualOrderStore.createOrder>> | undefined;
+    for (let attempt = 0; attempt <= MAX_ORDER_NUMBER_RETRIES; attempt++) {
+      try {
+        created = await ManualOrderStore.createOrder(newOrder, newReservation, ticket);
+        break;
+      } catch (error) {
+        const pgError = error as {
+          code?: unknown;
+          message?: unknown;
+          constraint?: unknown;
+          detail?: unknown;
+        };
+        const isOrderNumberCollision =
+          pgError?.code === "23505" &&
+          (String(pgError?.constraint || "").includes("order_number") ||
+            String(pgError?.message || "").includes("order_number") ||
+            String(pgError?.detail || "").includes("order_number"));
+
+        if (isOrderNumberCollision && attempt < MAX_ORDER_NUMBER_RETRIES) {
+          newOrder.orderNumber = generateOrderNumber();
+          continue;
+        }
+
+        console.error("Failed to persist order and inventory reservation:", {
+          code: pgError?.code,
+          message: pgError?.message,
+          constraint: pgError?.constraint,
+        });
+        return {
+          success: false,
+          code: "SERVER_ERROR",
+          message: "Shared order storage is unavailable. No order was accepted.",
+        };
+      }
+    }
+    if (!created) {
       return {
         success: false,
         code: "SERVER_ERROR",

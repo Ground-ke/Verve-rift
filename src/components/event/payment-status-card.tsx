@@ -551,11 +551,9 @@ export const PaymentStatusCard: React.FC<PaymentStatusCardProps> = ({
                 </Link>
               </Button>
             ) : (
-              <Button asChild variant="event" size="xl" className="w-full sm:w-auto">
-                <Link to="/ticket/$code" params={{ code: "HR-7892-4910" }}>
-                  <Ticket className="mr-2 size-5" /> View Digital Ticket &amp; QR
-                </Link>
-              </Button>
+              <p className="text-sm text-bone-muted self-center">
+                Your tickets will be emailed to you once your payment is verified.
+              </p>
             )}
             <Button asChild variant="spectral" size="xl">
               <Link to="/">
