@@ -72,7 +72,7 @@ function TicketDemo() {
                     <dt className="text-xs uppercase tracking-widest text-muted-foreground">
                       Ticket
                     </dt>
-                    <dd className="mt-1 text-xl text-bone">Early Bird (Example)</dd>
+                    <dd className="mt-1 text-xl text-bone">Revenant (Example)</dd>
                   </div>
                   <div>
                     <dt className="text-xs uppercase tracking-widest text-muted-foreground">

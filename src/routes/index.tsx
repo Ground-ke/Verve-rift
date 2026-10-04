@@ -40,13 +40,13 @@ export const Route = createFileRoute("/")({
       {
         name: "description",
         content:
-          "Hauntings of the Rift at Top Cliff Lodge, Nakuru. 31 October 2026 from 4 PM. Presented by Serve & Co. Tickets from KES 1,000.",
+          "Hauntings of the Rift at Top Cliff Lodge, Nakuru. 31 October 2026 from 4 PM. Presented by Serve & Co. Tickets from KES 1,500.",
       },
       { property: "og:title", content: "Hauntings of the Rift — Verve & Co." },
       {
         property: "og:description",
         content:
-          "The most spooktakular Halloween party in Nakuru. Presented by Verve & Co. Tickets from KES 1,000.",
+          "The most spooktakular Halloween party in Nakuru. Presented by Verve & Co. Tickets from KES 1,500.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -56,9 +56,36 @@ export const Route = createFileRoute("/")({
 });
 
 const tickets: Ticket[] = [
-  { name: "Early Bird", price: 1000, people: "Single entry", note: "Single entry" },
-  { name: "Couple", price: 1800, people: "Entry for two", note: "Arrive together" },
-  { name: "Group of Four", price: 3200, people: "Entry for four", note: "Bring the whole crew" },
+  {
+    name: "Early Bird",
+    slug: "early-bird",
+    price: 1000,
+    people: "Single entry",
+    note: "Sold out",
+    soldOut: true,
+  },
+  { name: "Revenant", slug: "revenant", price: 1500, people: "Single entry", note: "Single entry" },
+  {
+    name: "Soulbound",
+    slug: "soulbound",
+    price: 2800,
+    people: "Entry for two",
+    note: "Arrive together",
+  },
+  {
+    name: "Coven",
+    slug: "coven",
+    price: 5000,
+    people: "Entry for four",
+    note: "Bring the whole crew",
+  },
+  {
+    name: "Outcasts",
+    slug: "outcasts",
+    price: 6900,
+    people: "Entry for six",
+    note: "Full pack entry",
+  },
 ];
 
 const nav = [
@@ -93,7 +120,7 @@ const faqs: Array<[string, string]> = [
   ["What time does it start?", "Doors open at 4 PM and the event continues till late."],
   [
     "How much are tickets?",
-    "Early Bird is KES 1,000, Couple is KES 1,800, and Group of Four is KES 3,200.",
+    "Early Bird is KES 1,000 (Sold out), Revenant is KES 1,500, Soulbound is KES 2,800, Coven is KES 5,000, and Outcasts is KES 6,900.",
   ],
   [
     "How do I buy a ticket?",
@@ -187,7 +214,7 @@ function MobileTicketBar({ visible }: { visible: boolean }) {
     >
       <Button asChild variant="event" size="xl" className="w-full shadow-2xl">
         <Link to="/checkout">
-          Buy tickets — from KES 1,000 <ArrowRight />
+          Buy tickets — from KES 1,500 <ArrowRight />
         </Link>
       </Button>
     </div>
@@ -391,7 +418,7 @@ function Index() {
           {[
             ["18+", "Admission"],
             ["Wickedly Fabulous", "Dress code"],
-            ["KES 1,000", "Tickets from"],
+            ["KES 1,500", "Tickets from"],
             ["31 Oct", "Saturday"],
           ].map(([big, small]) => (
             <div className="px-4 py-6 text-center" key={small}>
@@ -448,8 +475,8 @@ function Index() {
             </p>
           </div>
           <div className="grid gap-4 lg:grid-cols-3">
-            {tickets.map((ticket, i) => (
-              <TicketCard key={ticket.name} ticket={ticket} featured={i === 2} />
+            {tickets.map((ticket) => (
+              <TicketCard key={ticket.name} ticket={ticket} featured={ticket.slug === "coven"} />
             ))}
           </div>
           {promotions.length > 0 && (

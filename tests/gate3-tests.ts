@@ -60,7 +60,7 @@ async function runTests() {
   console.log("\n--- 2. Quantity & Buyer Input Validation ---");
 
   const q0 = await OrderService.createOrder({
-    ticketTypeId: "early-bird",
+    ticketTypeId: "revenant",
     quantity: 0,
     buyerName: "Amani Mwangi",
     buyerPhone: "0712345678",
@@ -69,7 +69,7 @@ async function runTests() {
   assert(!q0.success && q0.code === "INVALID_INPUT", "Reject zero quantity");
 
   const qNeg = await OrderService.createOrder({
-    ticketTypeId: "early-bird",
+    ticketTypeId: "revenant",
     quantity: -2,
     buyerName: "Amani Mwangi",
     buyerPhone: "0712345678",
@@ -78,7 +78,7 @@ async function runTests() {
   assert(!qNeg.success && qNeg.code === "INVALID_INPUT", "Reject negative quantity");
 
   const qLimit = await OrderService.createOrder({
-    ticketTypeId: "early-bird",
+    ticketTypeId: "revenant",
     quantity: 100, // Exceeds technical request safety ceiling (50)
     buyerName: "Amani Mwangi",
     buyerPhone: "0712345678",
@@ -90,7 +90,7 @@ async function runTests() {
   );
 
   const emptyName = await OrderService.createOrder({
-    ticketTypeId: "early-bird",
+    ticketTypeId: "revenant",
     quantity: 1,
     buyerName: "",
     buyerPhone: "0712345678",
@@ -104,7 +104,7 @@ async function runTests() {
   console.log("\n--- 3. Server Authoritative Pricing & Snapshots ---");
 
   const order1 = await OrderService.createOrder({
-    ticketTypeId: "early-bird",
+    ticketTypeId: "revenant",
     quantity: 2,
     buyerName: "Wanjiku Kamau",
     buyerPhone: "0722112233",
@@ -112,15 +112,15 @@ async function runTests() {
   });
   assert(
     order1.success &&
-      order1.unitPriceKes === 1000 &&
-      order1.subtotalKes === 2000 &&
-      order1.totalKes === 2000 &&
+      order1.unitPriceKes === 1500 &&
+      order1.subtotalKes === 3000 &&
+      order1.totalKes === 3000 &&
       order1.admitsCount === 1,
-    "Authoritative Early Bird calculation: KES 1,000 * 2 = KES 2,000",
+    "Authoritative Revenant calculation: KES 1,500 * 2 = KES 3,000",
   );
 
   const order2 = await OrderService.createOrder({
-    ticketTypeId: "couple-pass",
+    ticketTypeId: "soulbound",
     quantity: 1,
     buyerName: "Kipchoge Keino",
     buyerPhone: "0740998877",
@@ -128,14 +128,14 @@ async function runTests() {
   });
   assert(
     order2.success &&
-      order2.unitPriceKes === 1800 &&
-      order2.totalKes === 1800 &&
+      order2.unitPriceKes === 2800 &&
+      order2.totalKes === 2800 &&
       order2.admitsCount === 2,
-    "Authoritative Couple Pass calculation: KES 1,800 (admits 2)",
+    "Authoritative Soulbound calculation: KES 2,800 (admits 2)",
   );
 
   const order3 = await OrderService.createOrder({
-    ticketTypeId: "group-of-four",
+    ticketTypeId: "coven",
     quantity: 1,
     buyerName: "Mercy Cherono",
     buyerPhone: "0711554433",
@@ -143,10 +143,10 @@ async function runTests() {
   });
   assert(
     order3.success &&
-      order3.unitPriceKes === 3200 &&
-      order3.totalKes === 3200 &&
+      order3.unitPriceKes === 5000 &&
+      order3.totalKes === 5000 &&
       order3.admitsCount === 4,
-    "Authoritative Group of Four calculation: KES 3,200 (admits 4)",
+    "Authoritative Coven calculation: KES 5,000 (admits 4)",
   );
 
   // -------------------------------------------------------------
@@ -156,7 +156,7 @@ async function runTests() {
 
   const idempKey = "test_idemp_key_12345";
   const firstReq = await OrderService.createOrder({
-    ticketTypeId: "early-bird",
+    ticketTypeId: "revenant",
     quantity: 1,
     buyerName: "Otieno Odhiambo",
     buyerPhone: "0712345678",
@@ -165,7 +165,7 @@ async function runTests() {
   });
 
   const secondReq = await OrderService.createOrder({
-    ticketTypeId: "early-bird",
+    ticketTypeId: "revenant",
     quantity: 1,
     buyerName: "Otieno Odhiambo",
     buyerPhone: "0712345678",

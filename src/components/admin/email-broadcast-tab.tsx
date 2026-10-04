@@ -106,9 +106,9 @@ export function AudienceBroadcastTab() {
       setCtaUrl("https://verve-rift.vercel.app/recover");
     } else if (type === "promo") {
       setSubject("Flash Ticket Release & Exclusive Friend Bundles");
-      setHeadline("Group of Four Flash Release (Limited Release)");
+      setHeadline("Coven Flash Release (Limited Release)");
       setMessage(
-        "Hello,\n\nDue to immense demand, we have unlocked additional Group of Four squad passes admitting 4 guests together for KES 3,200.\n\nIf you have friends planning to join you at the Rift, share this exclusive invitation before allocation sells out.",
+        "Hello,\n\nDue to immense demand, we have unlocked additional Coven squad passes admitting 4 guests together for KES 5,000.\n\nIf you have friends planning to join you at the Rift, share this exclusive invitation before allocation sells out.",
       );
       setCtaText("Secure Squad Pass");
       setCtaUrl("https://verve-rift.vercel.app/checkout");
@@ -337,8 +337,10 @@ export function AudienceBroadcastTab() {
                 <option value="all">All Ticket Buyers ({audience.length} recipients)</option>
                 <option value="approved">Approved &amp; Paid Orders Only</option>
                 <option value="tier:early">Early Bird Pass Holders</option>
-                <option value="tier:couple">Couple Pass Holders</option>
-                <option value="tier:group">Group of Four Pass Holders</option>
+                <option value="tier:revenant">Revenant Pass Holders</option>
+                <option value="tier:soulbound">Soulbound Pass Holders</option>
+                <option value="tier:coven">Coven Pass Holders</option>
+                <option value="tier:outcasts">Outcasts Pass Holders</option>
               </select>
             </div>
 
@@ -522,24 +524,44 @@ export function AudienceBroadcastTab() {
                   Early Bird
                 </button>
                 <button
-                  onClick={() => setTierFilter("couple")}
+                  onClick={() => setTierFilter("revenant")}
                   className={`px-2 py-0.5 rounded font-mono border ${
-                    tierFilter === "couple"
+                    tierFilter === "revenant"
                       ? "bg-amber-500/20 border-amber-500/50 text-amber-300"
                       : "border-border text-muted-foreground hover:text-bone"
                   }`}
                 >
-                  Couple
+                  Revenant
                 </button>
                 <button
-                  onClick={() => setTierFilter("group")}
+                  onClick={() => setTierFilter("soulbound")}
                   className={`px-2 py-0.5 rounded font-mono border ${
-                    tierFilter === "group"
+                    tierFilter === "soulbound"
                       ? "bg-amber-500/20 border-amber-500/50 text-amber-300"
                       : "border-border text-muted-foreground hover:text-bone"
                   }`}
                 >
-                  Group of 4
+                  Soulbound
+                </button>
+                <button
+                  onClick={() => setTierFilter("coven")}
+                  className={`px-2 py-0.5 rounded font-mono border ${
+                    tierFilter === "coven"
+                      ? "bg-amber-500/20 border-amber-500/50 text-amber-300"
+                      : "border-border text-muted-foreground hover:text-bone"
+                  }`}
+                >
+                  Coven
+                </button>
+                <button
+                  onClick={() => setTierFilter("outcasts")}
+                  className={`px-2 py-0.5 rounded font-mono border ${
+                    tierFilter === "outcasts"
+                      ? "bg-amber-500/20 border-amber-500/50 text-amber-300"
+                      : "border-border text-muted-foreground hover:text-bone"
+                  }`}
+                >
+                  Outcasts
                 </button>
               </div>
             </div>

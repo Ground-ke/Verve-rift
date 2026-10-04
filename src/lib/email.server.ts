@@ -11,9 +11,25 @@ export async function sendRecoveryEmail(input: {
   links: RecoveryLink[];
 }): Promise<{ success: boolean; id?: string; simulated?: boolean; error?: string }> {
   const rawUser =
-    process.env["SMTP_USER"] || process.env["GMAIL_USER"] || "verve.n.co.ke@gmail.com";
-  const rawPass = process.env["SMTP_PASS"] || process.env["GMAIL_APP_PASSWORD"];
-  const siteUrl = process.env["SITE_URL"] ?? "https://hauntings-of-the-rift.lovable.app";
+    process.env["SMTP_USER"] ||
+    process.env["SMTP_USERNAME"] ||
+    process.env["GMAIL_USER"] ||
+    process.env["EMAIL_USER"] ||
+    "verve.n.co.ke@gmail.com";
+  const rawPass =
+    process.env["SMTP_PASS"] ||
+    process.env["SMTP_PASSWORD"] ||
+    process.env["GMAIL_APP_PASSWORD"] ||
+    process.env["GMAIL_PASS"] ||
+    process.env["GMAIL_PASSWORD"] ||
+    process.env["GOOGLE_APP_PASSWORD"] ||
+    process.env["EMAIL_PASS"] ||
+    process.env["EMAIL_PASSWORD"];
+  const siteUrl =
+    process.env["SITE_URL"] ||
+    process.env["PUBLIC_SITE_URL"] ||
+    process.env["APP_URL"] ||
+    "https://verve-rift.vercel.app";
   const user = rawUser.trim();
   const from = process.env["EMAIL_FROM"] || `"Verve & Co." <${user}>`;
 

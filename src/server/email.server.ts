@@ -19,7 +19,8 @@ export {
   type TicketEmailItem,
 };
 
-let smtpTransporter: nodemailer.Transporter | null = null;
+type SmtpTransporter = ReturnType<typeof nodemailer.createTransport>;
+let smtpTransporter: SmtpTransporter | null = null;
 let smtpConfigKey = "";
 
 export function resolveSmtpCredentials(): { user: string; pass: string } | null {
@@ -67,7 +68,7 @@ export function isGmailSmtpConfigured(): boolean {
  * - SMTP_PORT / EMAIL_PORT (defaults to 465)
  * - SMTP_SECURE
  */
-export function getSmtpTransporter(): nodemailer.Transporter | null {
+export function getSmtpTransporter(): SmtpTransporter | null {
   const creds = resolveSmtpCredentials();
   if (!creds) return null;
 
@@ -279,6 +280,7 @@ export async function sendTicketConfirmationEmail(params: {
     !tier ||
     !Number.isInteger(qty) ||
     !qty ||
+    typeof total !== "number" ||
     !Number.isFinite(total) ||
     total < 0 ||
     !Number.isInteger(admitsCount) ||

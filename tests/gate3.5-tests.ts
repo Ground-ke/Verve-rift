@@ -31,26 +31,26 @@ async function runGate35Tests() {
   // -------------------------------------------------------------
   console.log("\n--- 1. Purchase Limit Business vs Technical Safety Ceiling ---");
 
-  const earlyBird = OrderService.getTicketType("early-bird");
-  const couplePass = OrderService.getTicketType("couple-pass");
-  const groupOfFour = OrderService.getTicketType("group-of-four");
+  const earlyBird = OrderService.getTicketType("revenant");
+  const couplePass = OrderService.getTicketType("soulbound");
+  const groupOfFour = OrderService.getTicketType("coven");
 
   assert(
     earlyBird !== null && earlyBird.purchaseLimit === null,
-    "Early Bird purchaseLimit is NULL (unconstrained business limit)",
+    "Revenant purchaseLimit is NULL (unconstrained business limit)",
   );
   assert(
     couplePass !== null && couplePass.purchaseLimit === null,
-    "Couple Pass purchaseLimit is NULL (unconstrained business limit)",
+    "Soulbound purchaseLimit is NULL (unconstrained business limit)",
   );
   assert(
     groupOfFour !== null && groupOfFour.purchaseLimit === null,
-    "Group of Four purchaseLimit is NULL (unconstrained business limit)",
+    "Coven purchaseLimit is NULL (unconstrained business limit)",
   );
 
   // Purchasing 15 tickets (which would have failed under previous "max 10") now succeeds
   const unconstrainedOrder = await OrderService.createOrder({
-    ticketTypeId: "early-bird",
+    ticketTypeId: "revenant",
     quantity: 15,
     buyerName: "Ochieng Otieno",
     buyerPhone: "0712345678",
@@ -63,7 +63,7 @@ async function runGate35Tests() {
 
   // Technical request safety ceiling enforcement (anti-overflow/anti-spam)
   const safetyExceeded = await OrderService.createOrder({
-    ticketTypeId: "early-bird",
+    ticketTypeId: "revenant",
     quantity: MAX_REQUEST_QUANTITY_CEILING + 1,
     buyerName: "Spam Bot",
     buyerPhone: "0712345678",
@@ -81,7 +81,7 @@ async function runGate35Tests() {
 
   OrderService._resetStoresForTesting();
   const expTestOrder = await OrderService.createOrder({
-    ticketTypeId: "early-bird",
+    ticketTypeId: "revenant",
     quantity: 2,
     buyerName: "Chebet Kiprop",
     buyerPhone: "0722112233",
@@ -128,10 +128,10 @@ async function runGate35Tests() {
   console.log("\n--- 3. Inventory Release & Re-availability ---");
 
   OrderService._resetStoresForTesting();
-  OrderService._setTotalInventoryForTesting("early-bird", 5);
+  OrderService._setTotalInventoryForTesting("revenant", 5);
 
   const res1 = await OrderService.createOrder({
-    ticketTypeId: "early-bird",
+    ticketTypeId: "revenant",
     quantity: 3,
     buyerName: "Wanjiku Njoroge",
     buyerPhone: "0711223344",
@@ -144,7 +144,7 @@ async function runGate35Tests() {
 
   // Attempting to reserve 3 more tickets fails because 3 + 3 = 6 > 5
   const resOver = await OrderService.createOrder({
-    ticketTypeId: "early-bird",
+    ticketTypeId: "revenant",
     quantity: 3,
     buyerName: "Muthoni Kariuki",
     buyerPhone: "0722334455",
@@ -168,7 +168,7 @@ async function runGate35Tests() {
 
     // Now reserving all 5 tickets succeeds
     const resAll = await OrderService.createOrder({
-      ticketTypeId: "early-bird",
+      ticketTypeId: "revenant",
       quantity: 5,
       buyerName: "Muthoni Kariuki",
       buyerPhone: "0722334455",
@@ -177,7 +177,7 @@ async function runGate35Tests() {
     assert(resAll.success, "Customer can reserve all 5 released tickets after expiration");
   } finally {
     Date.now = originalNow;
-    OrderService._setTotalInventoryForTesting("early-bird", null);
+    OrderService._setTotalInventoryForTesting("revenant", null);
   }
 
   // -------------------------------------------------------------
@@ -187,7 +187,7 @@ async function runGate35Tests() {
 
   OrderService._resetStoresForTesting();
   const orderA = await OrderService.createOrder({
-    ticketTypeId: "early-bird",
+    ticketTypeId: "revenant",
     quantity: 1,
     buyerName: "Customer A",
     buyerPhone: "0711111111",
@@ -195,7 +195,7 @@ async function runGate35Tests() {
   });
 
   const orderB = await OrderService.createOrder({
-    ticketTypeId: "couple-pass",
+    ticketTypeId: "soulbound",
     quantity: 1,
     buyerName: "Customer B",
     buyerPhone: "0722222222",
@@ -256,9 +256,9 @@ async function runGate35Tests() {
   OrderService._resetStoresForTesting();
   const testKey = "idemp_test_hardening_key_999";
 
-  // Request 1: 2 Early Bird tickets
+  // Request 1: 2 Revenant tickets
   const idempReq1 = await OrderService.createOrder({
-    ticketTypeId: "early-bird",
+    ticketTypeId: "revenant",
     quantity: 2,
     buyerName: "Kiplagat Ruto",
     buyerPhone: "0712345678",
@@ -269,7 +269,7 @@ async function runGate35Tests() {
 
   // Request 2: Identical retry with same idempotency key
   const idempReq2 = await OrderService.createOrder({
-    ticketTypeId: "early-bird",
+    ticketTypeId: "revenant",
     quantity: 2,
     buyerName: "Kiplagat Ruto",
     buyerPhone: "0712345678",
@@ -283,7 +283,7 @@ async function runGate35Tests() {
 
   // Request 3: Same key with DIFFERENT payload (Quantity 4 instead of 2)
   const idempConflict = await OrderService.createOrder({
-    ticketTypeId: "early-bird",
+    ticketTypeId: "revenant",
     quantity: 4, // CHANGED QUANTITY
     buyerName: "Kiplagat Ruto",
     buyerPhone: "0712345678",
@@ -302,30 +302,30 @@ async function runGate35Tests() {
 
   OrderService._resetStoresForTesting();
   const snapshotOrder = await OrderService.createOrder({
-    ticketTypeId: "early-bird",
+    ticketTypeId: "revenant",
     quantity: 2,
     buyerName: "Aoko Otieno",
     buyerPhone: "0733123456",
     clientIp: "10.0.0.8",
   });
   assert(
-    snapshotOrder.success && snapshotOrder.unitPriceKes === 1000 && snapshotOrder.totalKes === 2000,
-    "Order created at initial catalog price: KES 1,000 * 2 = KES 2,000",
+    snapshotOrder.success && snapshotOrder.unitPriceKes === 1500 && snapshotOrder.totalKes === 3000,
+    "Order created at initial catalog price: KES 1,500 * 2 = KES 3,000",
   );
 
   if (snapshotOrder.success) {
-    // Modify catalog price for early-bird
-    OrderService._setCatalogPriceForTesting("early-bird", 1500);
+    // Modify catalog price for revenant
+    OrderService._setCatalogPriceForTesting("revenant", 2000);
 
     // Retrieve original order
     const retrieved = OrderService.getOrder(snapshotOrder.orderId, snapshotOrder.checkoutToken);
     assert(
-      retrieved !== null && retrieved.unitPriceKes === 1000 && retrieved.totalKes === 2000,
-      "Order retains snapshotted unit price (KES 1,000) despite catalog price increase to KES 1,500",
+      retrieved !== null && retrieved.unitPriceKes === 1500 && retrieved.totalKes === 3000,
+      "Order retains snapshotted unit price (KES 1,500) despite catalog price increase to KES 2,000",
     );
 
     // Restore catalog price
-    OrderService._setCatalogPriceForTesting("early-bird", 1000);
+    OrderService._setCatalogPriceForTesting("revenant", 1500);
   }
 
   // -------------------------------------------------------------
@@ -334,11 +334,11 @@ async function runGate35Tests() {
   console.log("\n--- 8. Order & Reservation Creation Atomicity ---");
 
   OrderService._resetStoresForTesting();
-  OrderService._setTotalInventoryForTesting("early-bird", 1);
+  OrderService._setTotalInventoryForTesting("revenant", 1);
 
   // Try to create order for 2 tickets when only 1 exists
   const failedAtomic = await OrderService.createOrder({
-    ticketTypeId: "early-bird",
+    ticketTypeId: "revenant",
     quantity: 2,
     buyerName: "Atomicity Tester",
     buyerPhone: "0711002233",
@@ -352,7 +352,7 @@ async function runGate35Tests() {
   const activeRes = OrderService.getActiveReservedCount(earlyBird!.id);
   assert(activeRes === 0, "No orphaned reservation left behind after failed inventory check");
 
-  OrderService._setTotalInventoryForTesting("early-bird", null);
+  OrderService._setTotalInventoryForTesting("revenant", null);
 
   // -------------------------------------------------------------
   // 9. HTTP API Router Endpoint Status Codes & Security
@@ -364,7 +364,7 @@ async function runGate35Tests() {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      ticket_type_id: "early-bird",
+      ticket_type_id: "revenant",
       quantity: 1,
       buyer_name: "API Tester",
       buyer_phone: "0712345678",
@@ -383,7 +383,7 @@ async function runGate35Tests() {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      ticket_type_id: "early-bird",
+      ticket_type_id: "revenant",
       quantity: 5, // Different quantity with same key
       buyer_name: "API Tester",
       buyer_phone: "0712345678",

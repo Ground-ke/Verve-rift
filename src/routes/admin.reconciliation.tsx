@@ -63,7 +63,7 @@ export function AdminReconciliationPage() {
   const [isRefundModalOpen, setIsRefundModalOpen] = useState(false);
   const [refundOrderId, setRefundOrderId] = useState("");
   const [refundTicketCode, setRefundTicketCode] = useState("");
-  const [refundAmount, setRefundAmount] = useState<number>(1800);
+  const [refundAmount, setRefundAmount] = useState<number>(1500);
   const [refundReason, setRefundReason] = useState("");
   const [refundType, setRefundType] = useState<"full" | "partial">("full");
   const [reversalReference, setReversalReference] = useState("");

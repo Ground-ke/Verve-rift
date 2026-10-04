@@ -37,7 +37,7 @@ async function runPersistenceGateTests() {
     assert(databaseRejected, "Shared persistence refuses to provide an unconfigured mock database");
 
     const order = await OrderService.createOrder({
-      ticketTypeId: "early-bird",
+      ticketTypeId: "revenant",
       quantity: 1,
       buyerName: "Test Buyer",
       buyerPhone: "0712345678",

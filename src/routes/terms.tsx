@@ -104,8 +104,8 @@ function TermsPage() {
             </li>
             <li>
               <strong className="text-bone">Admits Count:</strong> Each ticket tier admits strictly
-              the designated number of guests: Early Bird admits 1, Couple Pass admits 2, and Group
-              of Four admits 4.
+              the designated number of guests: Early Bird admits 1 (Sold Out), Revenant admits 1,
+              Soulbound admits 2, Coven admits 4, and Outcasts admits 6.
             </li>
           </ul>
         </section>

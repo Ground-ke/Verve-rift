@@ -34,7 +34,7 @@ import { VerveBackButton, VerveIcon, VerveLogo } from "@/components/brand/verve-
 import { toast } from "sonner";
 import { useFaviconLoading } from "@/lib/dynamic-favicon";
 
-const ticketNames = ["early-bird", "couple", "couple-pass", "group-of-four"] as const;
+const ticketNames = ["early-bird", "revenant", "soulbound", "coven", "outcasts"] as const;
 const searchSchema = z.object({
   ticket: z.string().optional().catch(undefined),
   orderId: z.string().optional().catch(undefined),
@@ -73,6 +73,8 @@ interface TicketOption {
   price: number;
   admitsCount: number;
   description: string;
+  soldOut?: boolean;
+  purchaseLimit?: number | null;
 }
 
 const options: TicketOption[] = [
@@ -81,21 +83,41 @@ const options: TicketOption[] = [
     name: "Early Bird",
     price: 1000,
     admitsCount: 1,
-    description: "Single entry pass",
+    description: "Single entry pass — Sold out",
+    soldOut: true,
+    purchaseLimit: null,
   },
   {
-    id: "couple-pass",
-    name: "Couple Pass",
-    price: 1800,
+    id: "revenant",
+    name: "Revenant",
+    price: 1500,
+    admitsCount: 1,
+    description: "Single entry pass",
+    purchaseLimit: 4,
+  },
+  {
+    id: "soulbound",
+    name: "Soulbound",
+    price: 2800,
     admitsCount: 2,
     description: "Admits 2 guests together (1 QR bundle)",
+    purchaseLimit: 4,
   },
   {
-    id: "group-of-four",
-    name: "Group of Four",
-    price: 3200,
+    id: "coven",
+    name: "Coven",
+    price: 5000,
     admitsCount: 4,
     description: "Admits 4 guests together (1 QR bundle)",
+    purchaseLimit: 4,
+  },
+  {
+    id: "outcasts",
+    name: "Outcasts",
+    price: 6900,
+    admitsCount: 6,
+    description: "Admits 6 guests together (1 QR bundle)",
+    purchaseLimit: 4,
   },
 ];
 
@@ -105,9 +127,9 @@ function Checkout() {
 
   // Normalize initial selection from URL
   const initialSelected = useMemo(() => {
-    if (ticket === "couple") return "couple-pass";
-    if (options.some((o) => o.id === ticket)) return ticket as string;
-    return "early-bird";
+    const matched = options.find((o) => o.id === ticket && !o.soldOut);
+    if (matched) return matched.id;
+    return "revenant";
   }, [ticket]);
 
   const [selected, setSelected] = useState<string>(initialSelected);
@@ -121,26 +143,31 @@ function Checkout() {
       .then((r) => r.json())
       .then((data) => {
         if (data.success && Array.isArray(data.tiers) && data.tiers.length > 0) {
-          const mapped: TicketOption[] = data.tiers
-            .filter(
-              (t: {
-                slug: string;
-                name: string;
-                priceKes: number;
-                admitsCount: number;
-                active?: boolean;
-              }) => t.active !== false,
-            )
-            .map((t: { slug: string; name: string; priceKes: number; admitsCount: number }) => ({
-              id: t.slug,
-              name: t.name,
-              price: t.priceKes,
-              admitsCount: t.admitsCount,
-              description:
-                t.admitsCount === 1
-                  ? "Single entry pass"
-                  : `Admits ${t.admitsCount} guests together (1 QR bundle)`,
-            }));
+          const mapped: TicketOption[] = data.tiers.map(
+            (t: {
+              slug: string;
+              name: string;
+              priceKes: number;
+              admitsCount: number;
+              active?: boolean;
+              purchaseLimit?: number | null;
+            }) => {
+              const isSoldOut = t.active === false;
+              return {
+                id: t.slug,
+                name: t.name,
+                price: t.priceKes,
+                admitsCount: t.admitsCount,
+                description: isSoldOut
+                  ? "Single entry pass — Sold out"
+                  : t.admitsCount === 1
+                    ? "Single entry pass"
+                    : `Admits ${t.admitsCount} guests together (1 QR bundle)`,
+                soldOut: isSoldOut,
+                purchaseLimit: typeof t.purchaseLimit === "number" ? t.purchaseLimit : 4,
+              };
+            },
+          );
           if (mapped.length > 0) {
             setTicketOptions(mapped);
           }
@@ -186,7 +213,10 @@ function Checkout() {
       paymentPhase === "pending_approval",
   );
 
-  const choice = ticketOptions.find((o) => o.id === selected) || ticketOptions[0] || options[0];
+  const choice =
+    ticketOptions.find((o) => o.id === selected && !o.soldOut) ||
+    ticketOptions.find((o) => !o.soldOut) ||
+    options[1];
 
   // Real-time phone validation
   const phoneValidation = useMemo(() => {
@@ -630,19 +660,24 @@ function Checkout() {
 
                 <div className="mt-8 grid gap-4" role="radiogroup" aria-label="Ticket options">
                   {ticketOptions.map((o) => {
-                    const isSelected = selected === o.id;
+                    const isSoldOut = Boolean(o.soldOut);
+                    const isSelected = !isSoldOut && selected === o.id;
                     return (
                       <button
                         key={o.id}
                         type="button"
+                        disabled={isSoldOut}
                         onClick={() => {
+                          if (isSoldOut) return;
                           setSelected(o.id);
                           setQuantity(1);
                         }}
                         className={`group relative grid min-h-24 w-full grid-cols-[minmax(0,1fr)_auto] items-center border p-5 text-left transition-all ${
-                          isSelected
-                            ? "border-primary bg-oxblood/80 shadow-[0_0_24px_rgba(114,35,53,0.35)]"
-                            : "border-border bg-card hover:border-lavender/40 hover:bg-card/80"
+                          isSoldOut
+                            ? "border-border/60 bg-card/50 opacity-60 cursor-not-allowed"
+                            : isSelected
+                              ? "border-primary bg-oxblood/80 shadow-[0_0_24px_rgba(114,35,53,0.35)]"
+                              : "border-border bg-card hover:border-lavender/40 hover:bg-card/80"
                         }`}
                       >
                         <div>
@@ -651,6 +686,11 @@ function Checkout() {
                             <span className="border border-border/80 bg-background/60 px-2 py-0.5 text-xs text-bone-muted uppercase tracking-wider">
                               {o.admitsCount === 1 ? "1 Guest" : `Admits ${o.admitsCount}`}
                             </span>
+                            {isSoldOut && (
+                              <span className="border border-muted-foreground/40 bg-muted px-2 py-0.5 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                                Sold out
+                              </span>
+                            )}
                           </div>
                           <p className="mt-1 text-sm text-muted-foreground">{o.description}</p>
                         </div>
@@ -659,7 +699,7 @@ function Checkout() {
                             KES {o.price.toLocaleString()}
                           </span>
                           <span className="block text-xs uppercase tracking-widest text-lavender">
-                            {o.admitsCount > 1 ? "Per Bundle" : "Per Pass"}
+                            {isSoldOut ? "Sold out" : o.admitsCount > 1 ? "Per Bundle" : "Per Pass"}
                           </span>
                         </div>
                       </button>
@@ -698,7 +738,10 @@ function Checkout() {
                         variant="outline"
                         size="icon"
                         className="size-11 border-border bg-background text-bone hover:border-lavender"
-                        onClick={() => setQuantity((q) => q + 1)}
+                        onClick={() =>
+                          setQuantity((q) => Math.min(choice?.purchaseLimit ?? 4, q + 1))
+                        }
+                        disabled={quantity >= (choice?.purchaseLimit ?? 4)}
                         aria-label="Increase quantity"
                       >
                         <Plus className="size-4" />
@@ -1210,7 +1253,7 @@ function Checkout() {
                           id="mpesa-code"
                           rows={3}
                           className="mt-2 bg-background border-border text-bone font-mono text-sm placeholder:text-muted-foreground focus:border-amber-400"
-                          placeholder="e.g. TLK99XW82A or paste the entire SMS: TLK99XW82A Confirmed. Ksh1,000 sent to Verve & Co. on 31/10/26..."
+                          placeholder="e.g. TLK99XW82A or paste the entire SMS: TLK99XW82A Confirmed. Ksh1,500 sent to Verve & Co. on 31/10/26..."
                           value={mpesaRawInput}
                           onChange={(e) => {
                             setMpesaRawInput(e.target.value);

@@ -1,7 +1,23 @@
 import { getSharedPool } from "../db/index.ts";
 import type { PoolClient } from "pg";
-import type { StoredOrder, StoredReservation, TicketTypeConfig } from "./order-service";
+import {
+  OrderService,
+  type StoredOrder,
+  type StoredReservation,
+  type TicketTypeConfig,
+} from "./order-service";
 import type { DigitalTicketRecord, PaymentTransactionRecord } from "./tickets.server";
+
+function getEventCapacity(): number {
+  const raw = process.env["EVENT_CAPACITY"];
+  if (raw !== undefined && raw.trim() !== "") {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      return Math.floor(parsed);
+    }
+  }
+  return 700;
+}
 
 async function withTransaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {
   const client = await getSharedPool().connect();
@@ -47,19 +63,28 @@ export class ManualOrderStore {
         }
       }
 
-      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`inventory:${ticket.id}`]);
-      if (ticket.totalInventory !== null) {
-        const count = await client.query<{ quantity: string }>(
-          `SELECT COALESCE(SUM(quantity), 0)::text AS quantity
-           FROM public.manual_ticket_orders
-           WHERE ticket_type_id = $1
-             AND ((status IN ('pending', 'pending_approval') AND expires_at > NOW())
-               OR status IN ('approved', 'paid', 'completed'))`,
-          [ticket.id],
-        );
-        if (Number(count.rows[0]?.quantity || 0) + order.quantity > ticket.totalInventory) {
-          return { order, conflict: false, inventoryError: true };
+      await client.query("SELECT pg_advisory_xact_lock(hashtext('event_capacity'))");
+
+      const counts = await client.query<{ ticket_type_id: string; quantity: string }>(
+        `SELECT ticket_type_id, COALESCE(SUM(quantity), 0)::text AS quantity
+         FROM public.manual_ticket_orders
+         WHERE status IN ('approved', 'paid', 'completed')
+            OR status = 'pending_approval'
+            OR (status = 'pending' AND expires_at > NOW())
+         GROUP BY ticket_type_id`,
+      );
+
+      let committed = 0;
+      for (const row of counts.rows) {
+        const tierConfig = OrderService.getTicketType(row.ticket_type_id);
+        if (tierConfig) {
+          committed += Number(row.quantity || 0) * tierConfig.admitsCount;
         }
+      }
+
+      const capacity = getEventCapacity();
+      if (committed + order.quantity * ticket.admitsCount > capacity) {
+        return { order, conflict: false, inventoryError: true };
       }
 
       await client.query(

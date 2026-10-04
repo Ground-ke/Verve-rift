@@ -48,7 +48,7 @@ async function run() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ticket_type_id: "early-bird",
+          ticket_type_id: "revenant",
           quantity: 1,
           buyer_name: "Test Buyer",
           buyer_phone: "254712345678",

@@ -452,11 +452,11 @@ export function TicketManagementTab() {
               </SelectTrigger>
               <SelectContent className="bg-card border-border text-xs">
                 <SelectItem value="all">All Pass Tiers</SelectItem>
-                <SelectItem value="hellfire-vip">Hellfire VIP</SelectItem>
-                <SelectItem value="couple-pass">Couple Pass (2 Guests)</SelectItem>
-                <SelectItem value="general-admission">General Admission</SelectItem>
-                <SelectItem value="rift-coven">Rift Coven Group (5 Guests)</SelectItem>
-                <SelectItem value="early-bird">Early Bat</SelectItem>
+                <SelectItem value="early-bird">Early Bird (Sold Out)</SelectItem>
+                <SelectItem value="revenant">Revenant (1 Guest)</SelectItem>
+                <SelectItem value="soulbound">Soulbound (2 Guests)</SelectItem>
+                <SelectItem value="coven">Coven (4 Guests)</SelectItem>
+                <SelectItem value="outcasts">Outcasts (6 Guests)</SelectItem>
               </SelectContent>
             </Select>
           </div>

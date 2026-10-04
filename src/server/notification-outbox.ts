@@ -145,7 +145,6 @@ export class NotificationOutbox {
         const outcome = await this.deliver(task);
         return {
           id: randomUUID(),
-          dedupeKey: dedupeKey || null,
           channel: task.channel,
           notificationType: task.type,
           recipient: task.recipient,
