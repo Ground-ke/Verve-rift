@@ -9,6 +9,28 @@ export interface ApiIdentity {
   role: StaffRole;
 }
 
+export function isStaffAuthConfigured(): boolean {
+  const url = (process.env["SUPABASE_URL"] || process.env["VITE_SUPABASE_URL"] || "").trim();
+  const serviceRoleKey = (process.env["SUPABASE_SERVICE_ROLE_KEY"] || "").trim();
+
+  const missing: string[] = [];
+  if (!url) {
+    missing.push("SUPABASE_URL (or VITE_SUPABASE_URL)");
+  }
+  if (!serviceRoleKey) {
+    missing.push("SUPABASE_SERVICE_ROLE_KEY");
+  }
+
+  if (missing.length > 0) {
+    console.error(
+      `[StaffAuth] Organizer authentication is not configured. Missing environment variable(s): ${missing.join(", ")}`,
+    );
+    return false;
+  }
+
+  return true;
+}
+
 export function readBearerToken(request: Request): string | null {
   const token = request.headers
     .get("authorization")

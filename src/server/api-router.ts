@@ -16,6 +16,7 @@ import { isCloudSqlConfigured } from "../db/index.ts";
 import {
   authorizeStaffApiRequest,
   getAuthenticatedApiUser,
+  isStaffAuthConfigured,
   readBearerToken,
   requiredApiRoles,
 } from "./api-auth";
@@ -99,9 +100,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     // --------------------------------------------------------------------------
     if (pathname === "/api/health") {
       const cloudSqlConfigured = isCloudSqlConfigured();
-      const supabaseConfigured = Boolean(
-        process.env["SUPABASE_URL"] && process.env["SUPABASE_SERVICE_ROLE_KEY"],
-      );
+      const supabaseConfigured = isStaffAuthConfigured();
       const manualMpesaConfigured = Boolean(
         process.env["VITE_MPESA_PAYBILL"] &&
         process.env["VITE_MPESA_ACCOUNT"] &&
@@ -178,7 +177,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           503,
         );
       }
-      if (!process.env["SUPABASE_URL"] || !process.env["SUPABASE_SERVICE_ROLE_KEY"]) {
+      if (!isStaffAuthConfigured()) {
         return errorJson(
           "Checkout is unavailable because organizer authentication is not configured.",
           "STAFF_AUTH_UNAVAILABLE",
