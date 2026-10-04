@@ -61,7 +61,7 @@ export function generateBookingConfirmationEmailHtml(params: {
   // Banner image source (CID for offline/embedded, fallback to hosted or static URL)
   const bannerSrc = banner_cid
     ? `cid:${banner_cid}`
-    : banner_url || "https://verve-hauntings.vercel.app/event-banner.jpg";
+    : banner_url || "https://verve-rift.vercel.app/event-banner.jpg";
 
   // QR code image source
   const qrSrc = qr_code_cid ? `cid:${qr_code_cid}` : qr_data_url;
@@ -422,7 +422,7 @@ export function generateMpesaReceivedEmailHtml(params: {
     ticket_tier,
     quantity,
     total_amount,
-    order_url = "https://verve-hauntings.vercel.app",
+    order_url = "https://verve-rift.vercel.app",
     event_date = "Saturday, 31 October 2026",
     venue_name = "Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru",
   } = params;

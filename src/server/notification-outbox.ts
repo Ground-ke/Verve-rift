@@ -135,7 +135,32 @@ export class NotificationOutbox {
     task: NotificationOutboxTask,
     dedupeKey?: string,
   ): Promise<NotificationOutboxRecord> {
-    const id = await this.enqueue(task, dedupeKey);
+    let id: string;
+    try {
+      id = await this.enqueue(task, dedupeKey);
+    } catch (err) {
+      const pgCode = (err as { code?: string } | null)?.code;
+      if (pgCode === "42P01") {
+        const now = new Date().toISOString();
+        const outcome = await this.deliver(task);
+        return {
+          id: randomUUID(),
+          dedupeKey: dedupeKey || null,
+          channel: task.channel,
+          notificationType: task.type,
+          recipient: task.recipient,
+          status: outcome.accepted ? "accepted" : "failed",
+          attempts: 1,
+          providerMessageId: outcome.providerMessageId || null,
+          providerStatus: outcome.providerStatus,
+          lastError: outcome.error || null,
+          availableAt: now,
+          createdAt: now,
+          updatedAt: now,
+        };
+      }
+      throw err;
+    }
     await this.dispatch(id);
     const record = await this.get(id);
     if (!record) throw new Error("Notification outbox record disappeared after dispatch.");

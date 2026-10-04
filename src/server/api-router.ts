@@ -4,7 +4,7 @@ import { AdminServerService } from "./admin-service";
 import { RefundService } from "./refund-service";
 import { PaymentOperationsStore } from "./payment-operations-store";
 import { NotificationOutbox } from "./notification-outbox";
-import { getSiteBaseUrl } from "./email.server";
+import { getSiteBaseUrl, isGmailSmtpConfigured } from "./email.server";
 import { generateTicketPdfBuffer, generateTicketPassImageBuffer } from "./pdf-ticket";
 import { SlidingWindowRateLimiter } from "./rate-limiter";
 import {
@@ -123,18 +123,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         },
         services: {
           manualMpesaConfigured,
-          gmailSmtpConfigured: Boolean(
-            (process.env["SMTP_USER"] ||
-              process.env["SMTP_USERNAME"] ||
-              process.env["GMAIL_USER"] ||
-              process.env["EMAIL_USER"]) &&
-            (process.env["SMTP_PASS"] ||
-              process.env["SMTP_PASSWORD"] ||
-              process.env["GMAIL_APP_PASSWORD"] ||
-              process.env["GMAIL_PASSWORD"] ||
-              process.env["EMAIL_PASS"] ||
-              process.env["EMAIL_PASSWORD"]),
-          ),
+          gmailSmtpConfigured: isGmailSmtpConfigured(),
           whatsappConfigured: Boolean(
             process.env["WHATSAPP_API_KEY"] && process.env["WHATSAPP_API_URL"],
           ),
@@ -1757,7 +1746,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           headline: "You're on the Guest List for Rift Updates",
           message: `Greetings ${name || "guest"},\n\nYou have subscribed to updates for Hauntings of the Rift on 31 October 2026 at Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru.`,
           ctaText: "Explore Event & Passes",
-          ctaUrl: "https://verve-hauntings.vercel.app/checkout",
+          ctaUrl: `${getSiteBaseUrl()}/checkout`,
         },
       });
 

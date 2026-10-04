@@ -20,49 +20,72 @@ export {
 };
 
 let smtpTransporter: nodemailer.Transporter | null = null;
+let smtpConfigKey = "";
+
+export function resolveSmtpCredentials(): { user: string; pass: string } | null {
+  const rawUser =
+    process.env["SMTP_USER"] ||
+    process.env["SMTP_USERNAME"] ||
+    process.env["GMAIL_USER"] ||
+    process.env["GMAIL_EMAIL"] ||
+    process.env["EMAIL_USER"] ||
+    process.env["VITE_SMTP_USER"] ||
+    process.env["VITE_GMAIL_USER"] ||
+    "verve.n.co.ke@gmail.com";
+  const rawPass =
+    process.env["SMTP_PASS"] ||
+    process.env["SMTP_PASSWORD"] ||
+    process.env["GMAIL_APP_PASSWORD"] ||
+    process.env["GMAIL_PASS"] ||
+    process.env["GMAIL_PASSWORD"] ||
+    process.env["GOOGLE_APP_PASSWORD"] ||
+    process.env["EMAIL_PASS"] ||
+    process.env["EMAIL_PASSWORD"] ||
+    process.env["APP_PASSWORD"] ||
+    process.env["VITE_GMAIL_APP_PASSWORD"] ||
+    process.env["VITE_SMTP_PASS"];
+
+  if (!rawPass || !rawPass.trim()) return null;
+
+  return {
+    user: rawUser.trim(),
+    // Strip whitespace from passwords (Google App Passwords frequently have spaces like 'xxxx yyyy zzzz wwww')
+    pass: rawPass.replace(/\s+/g, ""),
+  };
+}
+
+export function isGmailSmtpConfigured(): boolean {
+  return resolveSmtpCredentials() !== null;
+}
 
 /**
  * Configure Nodemailer SMTP Transporter
  * Supports standard Vercel environment variables:
- * - SMTP_USER / SMTP_USERNAME / GMAIL_USER / EMAIL_USER
+ * - SMTP_USER / SMTP_USERNAME / GMAIL_USER / EMAIL_USER (defaults to verve.n.co.ke@gmail.com)
  * - SMTP_PASS / SMTP_PASSWORD / GMAIL_APP_PASSWORD / GMAIL_PASSWORD / EMAIL_PASS
  * - SMTP_HOST / EMAIL_HOST (defaults to smtp.gmail.com)
  * - SMTP_PORT / EMAIL_PORT (defaults to 465)
  * - SMTP_SECURE
  */
 export function getSmtpTransporter(): nodemailer.Transporter | null {
-  const rawUser =
-    process.env.SMTP_USER ||
-    process.env.SMTP_USERNAME ||
-    process.env.GMAIL_USER ||
-    process.env.EMAIL_USER;
-  const rawPass =
-    process.env.SMTP_PASS ||
-    process.env.SMTP_PASSWORD ||
-    process.env.GMAIL_APP_PASSWORD ||
-    process.env.GMAIL_PASSWORD ||
-    process.env.EMAIL_PASS ||
-    process.env.EMAIL_PASSWORD;
+  const creds = resolveSmtpCredentials();
+  if (!creds) return null;
 
-  if (!rawPass) return null;
+  const host = process.env["SMTP_HOST"] || process.env["EMAIL_HOST"] || "smtp.gmail.com";
+  const port = Number(process.env["SMTP_PORT"] || process.env["EMAIL_PORT"]) || 465;
+  const isExplicitSecure = process.env["SMTP_SECURE"] !== undefined;
+  const secure = isExplicitSecure ? process.env["SMTP_SECURE"] === "true" : port === 465;
+  const currentKey = `${host}:${port}:${secure}:${creds.user}:${creds.pass}`;
 
-  const user = rawUser.trim();
-  // Strip whitespace from passwords (Google App Passwords frequently have spaces like 'xxxx yyyy zzzz wwww')
-  const pass = rawPass.replace(/\s+/g, "");
-
-  const host = process.env.SMTP_HOST || process.env.EMAIL_HOST || "smtp.gmail.com";
-  const port = Number(process.env.SMTP_PORT || process.env.EMAIL_PORT) || 465;
-  const isExplicitSecure = process.env.SMTP_SECURE !== undefined;
-  const secure = isExplicitSecure ? process.env.SMTP_SECURE === "true" : port === 465;
-
-  if (!smtpTransporter) {
+  if (!smtpTransporter || smtpConfigKey !== currentKey) {
+    smtpConfigKey = currentKey;
     smtpTransporter = nodemailer.createTransport({
       host,
       port,
       secure,
       auth: {
-        user,
-        pass,
+        user: creds.user,
+        pass: creds.pass,
       },
       tls: {
         rejectUnauthorized: false,
@@ -79,9 +102,14 @@ export function getSmtpTransporter(): nodemailer.Transporter | null {
  * Helper to get the canonical base URL for emails and links
  */
 export function getSiteBaseUrl(): string {
-  if (process.env.SITE_URL) return process.env.SITE_URL.replace(/\/+$/, "");
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
-  return "https://verve-hauntings.vercel.app";
+  const configuredUrl =
+    process.env["SITE_URL"] || process.env["PUBLIC_SITE_URL"] || process.env["APP_URL"];
+  if (configuredUrl) return configuredUrl.replace(/\/+$/, "");
+  if (process.env["VERCEL_PROJECT_PRODUCTION_URL"]) {
+    return `https://${process.env["VERCEL_PROJECT_PRODUCTION_URL"]}`;
+  }
+  if (process.env["VERCEL_URL"]) return `https://${process.env["VERCEL_URL"]}`;
+  return "https://verve-rift.vercel.app";
 }
 
 /**
@@ -107,10 +135,15 @@ async function dispatchEmail({
     cid?: string;
   }>;
 }): Promise<{ success: boolean; id?: string; simulated?: boolean; error?: string }> {
+  const smtpUser =
+    process.env["SMTP_USER"] ||
+    process.env["SMTP_USERNAME"] ||
+    process.env["GMAIL_USER"] ||
+    process.env["EMAIL_USER"];
   const defaultFrom =
-    process.env.EMAIL_FROM ||
-    (process.env.SMTP_USER
-      ? `"Verve & Co." <${process.env.SMTP_USER}>`
+    process.env["EMAIL_FROM"] ||
+    (smtpUser
+      ? `"Verve & Co." <${smtpUser}>`
       : '"Verve & Co." <verve.n.co.ke@gmail.com>');
 
   const smtp = getSmtpTransporter();
@@ -121,13 +154,16 @@ async function dispatchEmail({
         to,
         subject,
         html,
-        attachments: attachments?.map((att) => ({
-          filename: att.filename,
-          content: att.content,
-          encoding: att.encoding || (typeof att.content === "string" ? "base64" : undefined),
-          contentType: att.contentType,
-          cid: att.cid,
-        })),
+        attachments: attachments?.map((att) => {
+          const encoding = att.encoding || (typeof att.content === "string" ? "base64" : undefined);
+          return {
+            filename: att.filename,
+            content: att.content,
+            ...(encoding ? { encoding } : {}),
+            ...(att.contentType ? { contentType: att.contentType } : {}),
+            ...(att.cid ? { cid: att.cid } : {}),
+          };
+        }),
       });
       return { success: true, id: info.messageId };
     } catch (smtpErr) {
@@ -347,9 +383,9 @@ export async function sendTicketConfirmationEmail(params: {
     event_date: eventDate,
     ticket_url: primaryTicketUrl,
     pdf_url: primaryPdfUrl,
-    banner_cid: bannerBuffer ? "event-banner" : undefined,
+    ...(bannerBuffer ? { banner_cid: "event-banner" } : {}),
     banner_url: `${siteUrl}/event-banner.jpg`,
-    qr_code_cid: qrBuffer.length > 0 ? "ticket-qr" : undefined,
+    ...(qrBuffer.length > 0 ? { qr_code_cid: "ticket-qr" } : {}),
     qr_data_url: qrDataUrl,
     venue_name: venue,
   });
@@ -475,11 +511,16 @@ export async function sendRecoveryEmail({
   to,
   recoveryUrl,
   ticketsCount,
+  links,
 }: {
   to: string;
-  recoveryUrl: string;
-  ticketsCount: number;
+  recoveryUrl?: string;
+  ticketsCount?: number;
+  name?: string;
+  links?: Array<{ code?: string; tierName?: string; url: string }>;
 }): Promise<{ success: boolean; id?: string; simulated?: boolean; error?: string }> {
+  const resolvedUrl = recoveryUrl || links?.[0]?.url || `${getSiteBaseUrl()}/recover`;
+  const resolvedCount = ticketsCount ?? (links ? Math.max(1, links.length) : 1);
   const emailHtml = `
     <!DOCTYPE html>
     <html>
@@ -496,11 +537,11 @@ export async function sendRecoveryEmail({
           </p>
 
           <p style="font-size:14px; line-height:1.6; color:#A09BA8;">
-            We found <strong style="color:#F5F2EB;">${ticketsCount}</strong> ticket pass(es) linked to your records. Click the button below to view and download your passes. This secure link is valid for 1 hour.
+            We found <strong style="color:#F5F2EB;">${resolvedCount}</strong> ticket pass(es) linked to your records. Click the button below to view and download your passes. This secure link is valid for 1 hour.
           </p>
 
           <div style="text-align:center; margin:28px 0;">
-            <a href="${recoveryUrl}" style="background:#8A1C2C; color:#FFFFFF; padding:12px 28px; text-decoration:none; font-weight:bold; font-size:15px; border-radius:4px; display:inline-block; letter-spacing:0.05em;">
+            <a href="${resolvedUrl}" style="background:#8A1C2C; color:#FFFFFF; padding:12px 28px; text-decoration:none; font-weight:bold; font-size:15px; border-radius:4px; display:inline-block; letter-spacing:0.05em;">
               ACCESS MY DIGITAL TICKETS
             </a>
           </div>
@@ -670,7 +711,7 @@ export async function sendOrganizerNewMpesaNotification(params: {
   orderId?: string;
 }): Promise<{ success: boolean; id?: string; simulated?: boolean; error?: string }> {
   const organizerEmail =
-    process.env.ORGANIZER_EMAIL || process.env.SMTP_USER || "verve.n.co.ke@gmail.com";
+    process.env["ORGANIZER_EMAIL"] || process.env["SMTP_USER"] || "verve.n.co.ke@gmail.com";
   const siteUrl = getSiteBaseUrl();
   const targetId = params.orderId || params.orderNumber;
   const adminUrl = `${siteUrl}/admin?tab=verifications&order=${encodeURIComponent(targetId)}`;

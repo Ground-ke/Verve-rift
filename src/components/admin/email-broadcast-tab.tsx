@@ -95,7 +95,7 @@ export function AudienceBroadcastTab() {
         "Greetings,\n\nThe veil is thinning. We are beyond excited to unveil the official sound architects performing at Hauntings of the Rift on Saturday, 31 October 2026 at Top Cliff Lodge, Nakuru.\n\nPrepare for unprecedented sound, immersive kinetic lasers, and spine-chilling electronic rhythms running from 4:00 PM till dawn.\n\nKeep your QR code passes saved to your phone or offline storage.",
       );
       setCtaText("View Stage Timetable");
-      setCtaUrl("https://verve-hauntings.vercel.app");
+      setCtaUrl("https://verve-rift.vercel.app");
     } else if (type === "logistics") {
       setSubject("Important Entry Instructions & Parking Guide — 31 October");
       setHeadline("Gates Open at 4:00 PM • Fast-Track Verification");
@@ -103,7 +103,7 @@ export function AudienceBroadcastTab() {
         "Important Gate & Security Details for Saturday, 31 October:\n\n1. Location: Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru.\n2. Entry Requirement: Physical or Digital Pass QR code with Valid Original ID (Strictly 18+).\n3. Dress Code: Wickedly Fabulous.\n4. Arrive early to ensure swift gate check-in and beat the entry queue.",
       );
       setCtaText("Open My Pass");
-      setCtaUrl("https://verve-hauntings.vercel.app/recover");
+      setCtaUrl("https://verve-rift.vercel.app/recover");
     } else if (type === "promo") {
       setSubject("Flash Ticket Release & Exclusive Friend Bundles");
       setHeadline("Group of Four Flash Release (Limited Release)");
@@ -111,7 +111,7 @@ export function AudienceBroadcastTab() {
         "Hello,\n\nDue to immense demand, we have unlocked additional Group of Four squad passes admitting 4 guests together for KES 3,200.\n\nIf you have friends planning to join you at the Rift, share this exclusive invitation before allocation sells out.",
       );
       setCtaText("Secure Squad Pass");
-      setCtaUrl("https://verve-hauntings.vercel.app/checkout");
+      setCtaUrl("https://verve-rift.vercel.app/checkout");
     }
   };
 
@@ -402,7 +402,7 @@ export function AudienceBroadcastTab() {
                 <Input
                   value={ctaUrl}
                   onChange={(e) => setCtaUrl(e.target.value)}
-                  placeholder="https://verve-hauntings.vercel.app"
+                  placeholder="https://verve-rift.vercel.app"
                   className="bg-background border-border text-xs text-bone"
                 />
               </div>
