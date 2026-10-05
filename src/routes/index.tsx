@@ -782,6 +782,13 @@ function Index() {
           </div>
           <div className="flex flex-wrap items-center justify-center sm:justify-end gap-x-4 gap-y-2 text-xs text-muted-foreground">
             <Link
+              to="/affiliate"
+              className="text-amber-300 hover:text-amber-200 font-medium underline underline-offset-2"
+            >
+              Be an Affiliate
+            </Link>
+            <span>·</span>
+            <Link
               to="/terms"
               className="text-bone-muted hover:text-bone underline underline-offset-2"
             >

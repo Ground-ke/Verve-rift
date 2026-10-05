@@ -10,7 +10,9 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AffiliateRouteImport } from './routes/affiliate'
 import { Route as AdminRouteImport } from './routes/admin'
+import { Route as AffiliateRouteImport } from './routes/affiliate'
 import { Route as CheckoutRouteImport } from './routes/checkout'
 import { Route as PayRouteImport } from './routes/pay'
 import { Route as PrivacyRouteImport } from './routes/privacy'
@@ -30,9 +32,19 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AffiliateRoute = AffiliateRouteImport.update({
+  id: '/affiliate',
+  path: '/affiliate',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminRoute = AdminRouteImport.update({
   id: '/admin',
   path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AffiliateRoute = AffiliateRouteImport.update({
+  id: '/affiliate',
+  path: '/affiliate',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CheckoutRoute = CheckoutRouteImport.update({
@@ -103,7 +115,9 @@ const TicketDemoRoute = TicketDemoRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/affiliate': typeof AffiliateRoute
   '/admin': typeof AdminRouteWithChildren
+  '/affiliate': typeof AffiliateRoute
   '/checkout': typeof CheckoutRoute
   '/pay': typeof PayRoute
   '/privacy': typeof PrivacyRoute
@@ -120,7 +134,9 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/affiliate': typeof AffiliateRoute
   '/admin': typeof AdminRouteWithChildren
+  '/affiliate': typeof AffiliateRoute
   '/checkout': typeof CheckoutRoute
   '/pay': typeof PayRoute
   '/privacy': typeof PrivacyRoute
@@ -138,7 +154,9 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/affiliate': typeof AffiliateRoute
   '/admin': typeof AdminRouteWithChildren
+  '/affiliate': typeof AffiliateRoute
   '/checkout': typeof CheckoutRoute
   '/pay': typeof PayRoute
   '/privacy': typeof PrivacyRoute
@@ -157,7 +175,9 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/affiliate'
     | '/admin'
+    | '/affiliate'
     | '/checkout'
     | '/pay'
     | '/privacy'
@@ -174,7 +194,9 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/affiliate'
     | '/admin'
+    | '/affiliate'
     | '/checkout'
     | '/pay'
     | '/privacy'
@@ -191,7 +213,9 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/affiliate'
     | '/admin'
+    | '/affiliate'
     | '/checkout'
     | '/pay'
     | '/privacy'
@@ -209,7 +233,9 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AffiliateRoute: typeof AffiliateRoute
   AdminRoute: typeof AdminRouteWithChildren
+  AffiliateRoute: typeof AffiliateRoute
   CheckoutRoute: typeof CheckoutRoute
   PayRoute: typeof PayRoute
   PrivacyRoute: typeof PrivacyRoute
@@ -231,11 +257,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/affiliate': {
+      id: '/affiliate'
+      path: '/affiliate'
+      fullPath: '/affiliate'
+      preLoaderRoute: typeof AffiliateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/admin': {
       id: '/admin'
       path: '/admin'
       fullPath: '/admin'
       preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/affiliate': {
+      id: '/affiliate'
+      path: '/affiliate'
+      fullPath: '/affiliate'
+      preLoaderRoute: typeof AffiliateRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/checkout': {
@@ -348,7 +388,9 @@ const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AffiliateRoute: AffiliateRoute,
   AdminRoute: AdminRouteWithChildren,
+  AffiliateRoute: AffiliateRoute,
   CheckoutRoute: CheckoutRoute,
   PayRoute: PayRoute,
   PrivacyRoute: PrivacyRoute,

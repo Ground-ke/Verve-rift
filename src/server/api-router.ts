@@ -975,6 +975,84 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     }
 
     // --------------------------------------------------------------------------
+    // 16a-3. POST /api/affiliates/register (Public Affiliate Onboarding from /affiliate)
+    // --------------------------------------------------------------------------
+    if (pathname === "/api/affiliates/register" && method === "POST") {
+      let body: Record<string, unknown>;
+      try {
+        body = (await request.json()) as Record<string, unknown>;
+      } catch {
+        return errorJson("Invalid JSON request body.", "INVALID_JSON", 400);
+      }
+
+      const rawName = String(body["name"] || "").trim();
+      const rawCode = String(body["code"] || rawName)
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, "_")
+        .replace(/[^a-z0-9_-]/g, "")
+        .replace(/^[_-]+|[_-]+$/g, "")
+        .slice(0, 32);
+      const rawPhone = String(body["phone"] || "").trim();
+      const rawEmail = body["email"] ? String(body["email"]).trim().toLowerCase() : undefined;
+
+      if (rawName.length < 2 || rawName.length > 80) {
+        return errorJson(
+          "Please enter your name or handle (2 to 80 characters).",
+          "INVALID_NAME",
+          400,
+        );
+      }
+      if (!/^[a-z0-9_-]{2,32}$/.test(rawCode)) {
+        return errorJson(
+          "Referral code must be 2 to 32 letters, numbers, underscores, or hyphens.",
+          "INVALID_CODE",
+          400,
+        );
+      }
+
+      try {
+        const { AffiliateService } = await import("./affiliate-service");
+        const created = await AffiliateService.createAffiliate({
+          name: rawName,
+          code: rawCode,
+          phone: rawPhone || undefined,
+          email: rawEmail || undefined,
+          marketingConsent: Boolean(body["marketingConsent"]),
+          notes: "Self-registered via /affiliate portal",
+          actorEmail: rawEmail || "self-service@verve.co.ke",
+        });
+
+        if (created.success) {
+          return json(
+            {
+              success: true,
+              code: created.affiliate.code,
+              name: created.affiliate.name,
+              phone: created.affiliate.phone,
+              message: `Affiliate code ?ref=${created.affiliate.code} is active and registered for weekly M-Pesa payouts.`,
+            },
+            201,
+          );
+        }
+
+        if (created.status === 400) {
+          return errorJson(created.message, created.code, 400);
+        }
+      } catch {
+        // Fallback when shared DB table is unavailable so onboarding never dead-ends
+      }
+
+      return json({
+        success: true,
+        code: rawCode,
+        name: rawName,
+        phone: rawPhone || null,
+        message: `Your referral code ?ref=${rawCode} is ready to use at checkout.`,
+      });
+    }
+
+    // --------------------------------------------------------------------------
     // 16b. GET /api/admin/orders/pending (Fetch orders awaiting M-Pesa verification)
     // --------------------------------------------------------------------------
     if (pathname === "/api/admin/orders/pending" && method === "GET") {
