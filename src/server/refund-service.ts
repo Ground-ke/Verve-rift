@@ -48,11 +48,18 @@ export class RefundService {
     ]);
     const orders = await OrderService.getAllOrders();
     const orderById = new Map(orders.map((order) => [order.id, order]));
-    const ticketsSold = receipts.reduce(
+    const paidReceipts = receipts.filter((receipt) => {
+      const order = orderById.get(receipt.orderId);
+      if (order?.isComp || order?.mpesaCode === "COMP" || receipt.receiptReference === "COMP") {
+        return false;
+      }
+      return true;
+    });
+    const ticketsSold = paidReceipts.reduce(
       (sum, receipt) => sum + (orderById.get(receipt.orderId)?.quantity || 0),
       0,
     );
-    const ledger: FinancialReconciliationRecord[] = receipts.map((receipt) => {
+    const ledger: FinancialReconciliationRecord[] = paidReceipts.map((receipt) => {
       const order = orderById.get(receipt.orderId);
       return {
         transactionId: receipt.id,
@@ -68,7 +75,7 @@ export class RefundService {
       };
     });
     const totals: FinancialSummaryTotals = {
-      grossRevenueKes: receipts.reduce((sum, receipt) => sum + receipt.amountKes, 0),
+      grossRevenueKes: paidReceipts.reduce((sum, receipt) => sum + receipt.amountKes, 0),
       totalRefundsKes: refunds.reduce((sum, refund) => sum + refund.amountKes, 0),
       platformFeesKes: null,
       netRevenueKes: null,
@@ -77,11 +84,11 @@ export class RefundService {
       totalRefundsCount: refunds.length,
     };
     return {
-      available: receipts.length > 0 || settlements.length > 0 || refunds.length > 0,
+      available: paidReceipts.length > 0 || settlements.length > 0 || refunds.length > 0,
       totals,
       ledger,
       refunds,
-      receipts,
+      receipts: paidReceipts,
       settlements,
       receiptReviews,
     };

@@ -4,6 +4,13 @@ import type { OrderStatus, ReservationStatus } from "../lib/database.types";
 import { ManualOrderStore } from "./manual-order-store";
 import { PaymentOperationsStore } from "./payment-operations-store";
 
+export const AFFILIATE_TERMS = {
+  commissionPerPersonKes: 140,
+  peoplePerCompPass: 30,
+};
+
+export type CompReason = "affiliate_milestone" | "performer_staff" | "sponsor" | "other";
+
 // Reservation Time-To-Live in milliseconds (30 minutes)
 export const RESERVATION_TTL_MS = 30 * 60 * 1000;
 
@@ -18,6 +25,7 @@ export interface CreateOrderInput {
   buyerName: string;
   buyerPhone: string;
   buyerEmail?: string | undefined;
+  referralCode?: string | undefined;
   idempotencyKey?: string | undefined;
   clientIp?: string;
 }
@@ -40,6 +48,7 @@ export interface ClientOrderResponse {
   buyerName: string;
   buyerPhone: string;
   buyerEmail?: string | undefined;
+  referralCode?: string | undefined;
   status: OrderStatus;
   mpesaCode?: string | undefined;
   mpesaMessage?: string | undefined;
@@ -88,6 +97,12 @@ export interface StoredOrder {
   buyerName: string;
   buyerPhone: string;
   buyerEmail?: string | undefined;
+  referralCode?: string | undefined;
+  isComp?: boolean | undefined;
+  compReason?: CompReason | string | undefined;
+  compNote?: string | undefined;
+  compForAffiliate?: string | undefined;
+  issuedBy?: string | undefined;
   status: OrderStatus;
   mpesaCode?: string;
   mpesaMessage?: string;
@@ -231,6 +246,17 @@ const defaultTicketTypes: Record<string, TicketTypeConfig> = {
   },
 };
 
+export function normalizeReferralCode(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const cleaned = raw
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .replace(/[^a-z0-9_-]/g, "")
+    .slice(0, 32);
+  return /^[a-z0-9_-]{2,32}$/.test(cleaned) ? cleaned : undefined;
+}
+
 function toClientOrderResponse(order: StoredOrder): ClientOrderResponse {
   return {
     success: true,
@@ -250,6 +276,7 @@ function toClientOrderResponse(order: StoredOrder): ClientOrderResponse {
     buyerName: order.buyerName,
     buyerPhone: order.buyerPhone,
     buyerEmail: order.buyerEmail,
+    referralCode: order.referralCode,
     status: order.status,
     mpesaCode: order.mpesaCode,
     mpesaMessage: order.mpesaMessage,
@@ -463,9 +490,11 @@ export class OrderService {
       buyerName,
       buyerPhone,
       buyerEmail,
+      referralCode,
       idempotencyKey,
       clientIp = "unknown",
     } = input;
+    const normalizedReferralCode = normalizeReferralCode(referralCode);
 
     // 1. Rate Limiting Check (Server-authoritative sliding window)
     if (!checkRateLimit(`ip:${clientIp}`, 20, 60000)) {
@@ -600,6 +629,7 @@ export class OrderService {
       buyerName: trimmedName,
       buyerPhone: normalizedPhone,
       buyerEmail: trimmedEmail || undefined,
+      referralCode: normalizedReferralCode,
       status: "pending",
       expiresAt,
       idempotencyKey,
@@ -921,6 +951,168 @@ export class OrderService {
    */
   static getAllOrders(): Promise<StoredOrder[]> {
     return ManualOrderStore.listOrders();
+  }
+
+  /**
+   * Compute affiliate referral leaderboard & commission metrics from orders, verified receipts, and tickets.
+   * Rules (AFFILIATE_TERMS):
+   * - KES 140 commission per person admitted
+   * - 1 free pass (comp) for every 30 people admitted
+   * - A person counts ONLY when ALL are true:
+   *   1) the order has a row in manual_payment_receipts (real verified payment)
+   *   2) order status is approved, paid or completed
+   *   3) the order is not a comp
+   *   4) the ticket status is 'valid' or 'used' (revoked, cancelled or refunded tickets drop out)
+   * - People per ticket = that ticket's admitsCount
+   */
+  static async getAffiliateReferralStats(): Promise<
+    Array<{
+      code: string;
+      approvedOrders: number;
+      admittedPeople: number;
+      peopleAdmitted: number;
+      pendingOrders: number;
+      pendingPeople: number;
+      totalRevenueKes: number;
+      commissionPerPersonKes: number;
+      commissionKes: number;
+      totalPayoutKes: number;
+      compsEarned: number;
+      compsIssued: number;
+      compsOutstanding: number;
+      latestOrderAt: string;
+    }>
+  > {
+    const [orders, tickets, receipts] = await Promise.all([
+      ManualOrderStore.listOrders(),
+      ManualOrderStore.getTickets(),
+      PaymentOperationsStore.getReceipts().catch(() => []),
+    ]);
+
+    const verifiedOrderIds = new Set(receipts.map((r) => r.orderId));
+    const ticketsByOrderId = new Map<string, typeof tickets>();
+    for (const ticket of tickets) {
+      const list = ticketsByOrderId.get(ticket.orderId) || [];
+      list.push(ticket);
+      ticketsByOrderId.set(ticket.orderId, list);
+    }
+
+    const map = new Map<
+      string,
+      {
+        code: string;
+        approvedOrders: number;
+        admittedPeople: number;
+        pendingOrders: number;
+        pendingPeople: number;
+        totalRevenueKes: number;
+        compsIssued: number;
+        latestOrderAt: string;
+      }
+    >();
+
+    const getOrCreateEntry = (code: string, createdAt: string) => {
+      let entry = map.get(code);
+      if (!entry) {
+        entry = {
+          code,
+          approvedOrders: 0,
+          admittedPeople: 0,
+          pendingOrders: 0,
+          pendingPeople: 0,
+          totalRevenueKes: 0,
+          compsIssued: 0,
+          latestOrderAt: createdAt,
+        };
+        map.set(code, entry);
+      } else if (new Date(createdAt).getTime() > new Date(entry.latestOrderAt).getTime()) {
+        entry.latestOrderAt = createdAt;
+      }
+      return entry;
+    };
+
+    for (const order of orders) {
+      const isCompOrder = Boolean(order.isComp || order.mpesaCode === "COMP");
+
+      if (isCompOrder) {
+        if (order.compReason === "affiliate_milestone") {
+          const affiliateCode = normalizeReferralCode(order.compForAffiliate || order.referralCode);
+          if (affiliateCode) {
+            const entry = getOrCreateEntry(affiliateCode, order.createdAt);
+            const orderTickets = ticketsByOrderId.get(order.id) || [];
+            const activeCompTickets = orderTickets.filter(
+              (t) => t.status === "valid" || t.status === "used",
+            );
+            entry.compsIssued += activeCompTickets.length;
+          }
+        }
+        continue;
+      }
+
+      const code = normalizeReferralCode(order.referralCode);
+      if (!code) continue;
+
+      const entry = getOrCreateEntry(code, order.createdAt);
+
+      const isEligibleApprovedOrder =
+        (order.status === "approved" ||
+          order.status === "paid" ||
+          order.status === "completed") &&
+        verifiedOrderIds.has(order.id);
+
+      if (isEligibleApprovedOrder) {
+        const orderTickets = ticketsByOrderId.get(order.id) || [];
+        const activeTickets = orderTickets.filter(
+          (t) => t.status === "valid" || t.status === "used",
+        );
+        const admittedFromOrder = activeTickets.reduce(
+          (sum, t) => sum + (t.admitsCount || 1),
+          0,
+        );
+        if (admittedFromOrder > 0) {
+          entry.approvedOrders += 1;
+          entry.admittedPeople += admittedFromOrder;
+          entry.totalRevenueKes += order.totalKes || 0;
+        }
+      } else if (order.status === "pending_approval") {
+        const peopleInPendingOrder = (order.quantity || 1) * (order.admitsCount || 1);
+        entry.pendingOrders += 1;
+        entry.pendingPeople += peopleInPendingOrder;
+      }
+    }
+
+    return Array.from(map.values())
+      .map((entry) => {
+        const commissionPerPersonKes = AFFILIATE_TERMS.commissionPerPersonKes;
+        const commissionKes = entry.admittedPeople * commissionPerPersonKes;
+        const compsEarned = Math.floor(
+          entry.admittedPeople / AFFILIATE_TERMS.peoplePerCompPass,
+        );
+        const compsIssued = entry.compsIssued;
+        const compsOutstanding = Math.max(0, compsEarned - compsIssued);
+        return {
+          code: entry.code,
+          approvedOrders: entry.approvedOrders,
+          admittedPeople: entry.admittedPeople,
+          peopleAdmitted: entry.admittedPeople,
+          pendingOrders: entry.pendingOrders,
+          pendingPeople: entry.pendingPeople,
+          totalRevenueKes: entry.totalRevenueKes,
+          commissionPerPersonKes,
+          commissionKes,
+          totalPayoutKes: commissionKes,
+          compsEarned,
+          compsIssued,
+          compsOutstanding,
+          latestOrderAt: entry.latestOrderAt,
+        };
+      })
+      .sort(
+        (a, b) =>
+          b.admittedPeople - a.admittedPeople ||
+          b.pendingPeople - a.pendingPeople ||
+          b.compsIssued - a.compsIssued,
+      );
   }
 
   /**

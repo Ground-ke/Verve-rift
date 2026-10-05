@@ -201,6 +201,10 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         body["idempotency_key"] || body["idempotencyKey"]
           ? String(body["idempotency_key"] || body["idempotencyKey"])
           : undefined;
+      const referralCode =
+        body["referral_code"] || body["referralCode"]
+          ? String(body["referral_code"] || body["referralCode"])
+          : undefined;
 
       if (
         !process.env["VITE_MPESA_PAYBILL"] ||
@@ -240,6 +244,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         buyerName,
         buyerPhone,
         buyerEmail,
+        referralCode,
         idempotencyKey,
         clientIp,
       });
@@ -843,6 +848,130 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       });
 
       return json(result, result.success ? 200 : 400);
+    }
+
+    // --------------------------------------------------------------------------
+    // 16a. POST /api/admin/tickets/comp (Admin issues complimentary passes)
+    // --------------------------------------------------------------------------
+    if (
+      (pathname === "/api/admin/tickets/comp" || pathname === "/api/admin/tickets/issue-comp") &&
+      method === "POST"
+    ) {
+      let body: Record<string, unknown>;
+      try {
+        body = (await request.json()) as Record<string, unknown>;
+      } catch {
+        return errorJson("Invalid JSON request body.", "INVALID_JSON", 400);
+      }
+
+      const tierSlug = String(
+        body["tier_slug"] || body["tierSlug"] || body["ticket_type_id"] || body["ticketTypeId"] || "revenant",
+      ).trim();
+      const quantity = body["quantity"] !== undefined ? parseInt(String(body["quantity"]), 10) : 1;
+      const attendeeName = String(
+        body["attendee_name"] ||
+          body["attendeeName"] ||
+          body["recipient_name"] ||
+          body["recipientName"] ||
+          body["buyer_name"] ||
+          body["buyerName"] ||
+          "",
+      );
+      const buyerEmail =
+        body["buyer_email"] || body["buyerEmail"] || body["recipient_email"] || body["recipientEmail"]
+          ? String(
+              body["buyer_email"] ||
+                body["buyerEmail"] ||
+                body["recipient_email"] ||
+                body["recipientEmail"],
+            )
+              .trim()
+              .toLowerCase()
+          : undefined;
+      const buyerPhone =
+        body["buyer_phone"] || body["buyerPhone"] || body["recipient_phone"] || body["recipientPhone"]
+          ? String(
+              body["buyer_phone"] ||
+                body["buyerPhone"] ||
+                body["recipient_phone"] ||
+                body["recipientPhone"],
+            ).trim()
+          : undefined;
+      const compReason = String(
+        body["comp_reason"] || body["compReason"] || body["reason"] || "",
+      );
+      const compNote =
+        body["comp_note"] || body["compNote"] || body["note"]
+          ? String(body["comp_note"] || body["compNote"] || body["note"])
+          : undefined;
+      const compForAffiliate =
+        body["comp_for_affiliate"] ||
+        body["compForAffiliate"] ||
+        body["referral_code"] ||
+        body["referralCode"]
+          ? String(
+              body["comp_for_affiliate"] ||
+                body["compForAffiliate"] ||
+                body["referral_code"] ||
+                body["referralCode"],
+            )
+          : undefined;
+      const idempotencyKey =
+        body["idempotency_key"] || body["idempotencyKey"]
+          ? String(body["idempotency_key"] || body["idempotencyKey"])
+          : undefined;
+      const actorEmail = String(
+        body["issued_by"] ||
+          body["issuedBy"] ||
+          body["actor_email"] ||
+          body["actorEmail"] ||
+          apiRequestUserId ||
+          "admin@verve.co.ke",
+      );
+      const actorId = body["actor_id"] ? String(body["actor_id"]) : undefined;
+
+      const clientIp =
+        request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+        request.headers.get("x-real-ip") ||
+        "127.0.0.1";
+
+      const result = await AdminServerService.issueCompTickets({
+        tierSlug,
+        quantity,
+        attendeeName,
+        buyerEmail,
+        buyerPhone,
+        compReason,
+        compNote,
+        compForAffiliate,
+        idempotencyKey,
+        actorEmail,
+        actorId,
+        clientIp,
+      });
+
+      if (!result.success) {
+        const status =
+          result.code === "TICKET_NOT_FOUND"
+            ? 404
+            : result.code === "INSUFFICIENT_INVENTORY"
+              ? 409
+              : 400;
+        return json(result, status);
+      }
+
+      return json(result, 201);
+    }
+
+    // --------------------------------------------------------------------------
+    // 16a-2. GET /api/admin/affiliates (Affiliate Referral Leaderboard & Stats)
+    // --------------------------------------------------------------------------
+    if (pathname === "/api/admin/affiliates" && method === "GET") {
+      const data = await AdminServerService.getAffiliateLeaderboard();
+      return json({
+        success: true,
+        ...data,
+      });
     }
 
     // --------------------------------------------------------------------------

@@ -1,7 +1,27 @@
+import { randomBytes, randomUUID } from "crypto";
 import { supabaseServer, isServerSupabaseConfigured } from "../lib/supabase/server";
 import { TicketsServerService, type DigitalTicketRecord } from "./tickets.server";
 import { NotificationOutbox } from "./notification-outbox";
 import { ManualOrderStore, getEventCapacity } from "./manual-order-store";
+import { generateTicketCode, generateTicketHmac } from "./crypto";
+import { getSiteBaseUrl } from "./email.server";
+import {
+  OrderService,
+  normalizeReferralCode,
+  AFFILIATE_TERMS,
+  type CompReason,
+  type StoredOrder,
+} from "./order-service";
+import { validateAndNormalizeKenyanPhone } from "../lib/validation/phone";
+
+export { AFFILIATE_TERMS, type CompReason };
+
+const VALID_COMP_REASONS: ReadonlySet<CompReason> = new Set<CompReason>([
+  "affiliate_milestone",
+  "performer_staff",
+  "sponsor",
+  "other",
+]);
 
 export interface PromotionRecord {
   id: string;
@@ -400,6 +420,374 @@ export class AdminServerService {
         emailResult.status === "accepted"
           ? `The email provider accepted the ticket email for ${ticket.buyerEmail}; recipient delivery is not confirmed.`
           : `Ticket email queued for retry; current outbox status is ${emailResult.status}.`,
+    };
+  }
+
+  /**
+   * Issue complimentary (comp) tickets for guests, artists, sponsors, or affiliate milestone rewards
+   */
+  static async issueCompTickets(params: {
+    tierSlug: string;
+    quantity?: number | undefined;
+    attendeeName: string;
+    buyerEmail?: string | undefined;
+    buyerPhone?: string | undefined;
+    compReason?: string | undefined;
+    reason?: string | undefined;
+    compNote?: string | undefined;
+    compForAffiliate?: string | undefined;
+    referralCode?: string | undefined;
+    idempotencyKey?: string | undefined;
+    actorEmail: string;
+    actorId?: string | undefined;
+    clientIp?: string | undefined;
+  }): Promise<{
+    success: boolean;
+    code?: string | undefined;
+    message: string;
+    order?: StoredOrder | undefined;
+    tickets?: DigitalTicketRecord[] | undefined;
+    emailDelivery?: {
+      status: string;
+      providerStatus: string;
+      providerMessageId?: string;
+      lastError?: string;
+    } | undefined;
+  }> {
+    const trimmedName = (params.attendeeName || "").trim();
+    if (!trimmedName || trimmedName.length < 2) {
+      return {
+        success: false,
+        code: "INVALID_INPUT",
+        message: "Please provide a valid recipient full name (at least 2 characters).",
+      };
+    }
+
+    const trimmedEmail = (params.buyerEmail || "").trim().toLowerCase();
+    if (!trimmedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      return {
+        success: false,
+        code: "INVALID_INPUT",
+        message: "A valid recipient email address is required to issue a complimentary pass.",
+      };
+    }
+
+    const rawReason = (params.compReason || params.reason || "").trim();
+    if (!VALID_COMP_REASONS.has(rawReason as CompReason)) {
+      return {
+        success: false,
+        code: "INVALID_INPUT",
+        message:
+          "Please select a valid comp reason (affiliate_milestone, performer_staff, sponsor, or other).",
+      };
+    }
+    const compReason = rawReason as CompReason;
+    const trimmedNote = (params.compNote || "").trim();
+
+    const normalizedAffiliate = normalizeReferralCode(
+      params.compForAffiliate || params.referralCode,
+    );
+    if (compReason === "affiliate_milestone" && !normalizedAffiliate) {
+      return {
+        success: false,
+        code: "INVALID_INPUT",
+        message:
+          "An affiliate referral code is required when issuing a comp pass for an affiliate milestone.",
+      };
+    }
+
+    const quantity = params.quantity ?? 1;
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 10) {
+      return {
+        success: false,
+        code: "INVALID_INPUT",
+        message: "Comp pass quantity must be an integer between 1 and 10.",
+      };
+    }
+
+    let normalizedPhone = "254700000000";
+    if (params.buyerPhone && params.buyerPhone.trim()) {
+      const phoneCheck = validateAndNormalizeKenyanPhone(params.buyerPhone.trim());
+      if (!phoneCheck.isValid) {
+        return {
+          success: false,
+          code: "INVALID_PHONE",
+          message: phoneCheck.error || "Please enter a valid Kenyan phone number.",
+        };
+      }
+      normalizedPhone = phoneCheck.normalized;
+    }
+
+    const ticketTier = OrderService.getTicketType(params.tierSlug);
+    if (!ticketTier) {
+      return {
+        success: false,
+        code: "TICKET_NOT_FOUND",
+        message: `Ticket tier '${params.tierSlug}' was not found.`,
+      };
+    }
+
+    const orderId = randomUUID();
+    const reservationId = randomUUID();
+    const generateOrderNumber = () =>
+      `HRT-2026-${Math.floor(100000 + Math.random() * 900000)}`;
+    const nowIso = new Date().toISOString();
+    const trimmedIdempotencyKey = (params.idempotencyKey || "").trim() || undefined;
+    const issuedBy = (params.actorEmail || "").trim() || "admin@verve.co.ke";
+
+    const compOrder: StoredOrder = {
+      id: orderId,
+      orderNumber: generateOrderNumber(),
+      checkoutToken: `tok_${randomBytes(32).toString("hex")}`,
+      eventId: ticketTier.eventId,
+      ticketTypeId: ticketTier.id,
+      ticketName: ticketTier.name,
+      admitsCount: ticketTier.admitsCount,
+      quantity,
+      unitPriceKes: 0,
+      discountKes: 0,
+      subtotalKes: 0,
+      totalKes: 0,
+      currency: "KES",
+      buyerName: trimmedName,
+      buyerPhone: normalizedPhone,
+      buyerEmail: trimmedEmail,
+      referralCode: normalizedAffiliate,
+      isComp: true,
+      compReason,
+      compNote: trimmedNote || undefined,
+      compForAffiliate: normalizedAffiliate,
+      issuedBy,
+      status: "completed",
+      mpesaCode: "COMP",
+      paymentReference: "COMP",
+      approvedBy: issuedBy,
+      approvedAt: nowIso,
+      expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+      idempotencyKey: trimmedIdempotencyKey,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+
+    const buildTickets = (ordNum: string): DigitalTicketRecord[] => {
+      const list: DigitalTicketRecord[] = [];
+      for (let i = 0; i < quantity; i++) {
+        const ticketNumber = generateTicketCode();
+        const qrHash = generateTicketHmac(ticketNumber, orderId, trimmedName);
+        list.push({
+          id: `tkt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          orderId,
+          orderNumber: ordNum,
+          ticketNumber,
+          qrHash,
+          tierSlug: ticketTier.slug,
+          tierName: ticketTier.name,
+          admitsCount: ticketTier.admitsCount,
+          attendeeName: trimmedName,
+          buyerEmail: trimmedEmail,
+          buyerPhone: normalizedPhone,
+          status: "valid",
+          priceKes: 0,
+          issuedAt: nowIso,
+          venue: {
+            name: "Top Cliff Lodge",
+            address: "Nakuru-Nairobi Highway, Free Area",
+            city: "Nakuru, Kenya",
+            date: "Saturday, 31 October 2026",
+            time: "4 PM till late",
+            ageRequirement: "18+",
+          },
+        });
+      }
+      return list;
+    };
+
+    let created:
+      | Awaited<ReturnType<typeof ManualOrderStore.createCompOrderAndTickets>>
+      | undefined;
+    for (let attempt = 0; attempt <= 5; attempt++) {
+      try {
+        const candidateTickets = buildTickets(compOrder.orderNumber);
+        created = await ManualOrderStore.createCompOrderAndTickets(
+          compOrder,
+          reservationId,
+          ticketTier,
+          candidateTickets,
+        );
+        break;
+      } catch (err) {
+        const pgError = err as {
+          code?: unknown;
+          constraint?: unknown;
+          message?: unknown;
+          detail?: unknown;
+        };
+        const isOrderNumberCollision =
+          pgError?.code === "23505" &&
+          (String(pgError?.constraint || "").includes("order_number") ||
+            String(pgError?.message || "").includes("order_number") ||
+            String(pgError?.detail || "").includes("order_number"));
+        if (isOrderNumberCollision && attempt < 5) {
+          compOrder.orderNumber = generateOrderNumber();
+          continue;
+        }
+        console.error("Failed to create comp order and tickets:", err);
+        return {
+          success: false,
+          code: "SERVER_ERROR",
+          message: "Shared order storage is unavailable. Could not issue complimentary pass.",
+        };
+      }
+    }
+
+    if (!created) {
+      return {
+        success: false,
+        code: "SERVER_ERROR",
+        message: "Could not issue complimentary pass.",
+      };
+    }
+
+    if (created.inventoryError) {
+      return {
+        success: false,
+        code: "INSUFFICIENT_INVENTORY",
+        message: "Not enough places left for this ticket",
+      };
+    }
+
+    const issuedTickets = created.tickets;
+    const firstTicket = issuedTickets[0];
+
+    if (created.duplicate) {
+      return {
+        success: true,
+        message: `Complimentary pass already issued (${issuedTickets.map((t) => t.ticketNumber).join(", ")}).`,
+        order: created.order,
+        tickets: issuedTickets,
+      };
+    }
+
+    await this.recordAuditLog({
+      actorId: params.actorId || "admin-user",
+      actorEmail: issuedBy,
+      actorRole: "admin",
+      action: "ticket.comp_issued",
+      targetTable: "tickets",
+      targetId: firstTicket?.ticketNumber || compOrder.orderNumber,
+      metadata: {
+        orderNumber: compOrder.orderNumber,
+        ticketNumbers: issuedTickets.map((t) => t.ticketNumber),
+        tierSlug: ticketTier.slug,
+        tierName: ticketTier.name,
+        quantity,
+        admitsPeople: quantity * ticketTier.admitsCount,
+        attendeeName: trimmedName,
+        buyerEmail: trimmedEmail,
+        compReason,
+        compNote: trimmedNote || null,
+        compForAffiliate: normalizedAffiliate || null,
+        issuedBy,
+      },
+      ipAddress: params.clientIp,
+    });
+
+    let emailDelivery: {
+      status: string;
+      providerStatus: string;
+      providerMessageId?: string;
+      lastError?: string;
+    } = { status: "not_requested", providerStatus: "no_recipient" };
+
+    if (trimmedEmail && firstTicket) {
+      const siteBase = getSiteBaseUrl();
+      try {
+        const outboxRecord = await NotificationOutbox.enqueueAndDispatch(
+          {
+            channel: "email",
+            type: "ticket_confirmation",
+            recipient: trimmedEmail,
+            payload: {
+              to: trimmedEmail,
+              buyerName: trimmedName,
+              orderNumber: compOrder.orderNumber,
+              totalKes: 0,
+              isComp: true,
+              ticketTier: `${ticketTier.name} (Complimentary)`,
+              quantity,
+              ticketUrl: `${siteBase}/ticket/${firstTicket.ticketNumber}`,
+              tickets: issuedTickets.map((t) => ({
+                ticketNumber: t.ticketNumber,
+                tierName: t.tierName,
+                attendeeName: t.attendeeName,
+                admitsCount: t.admitsCount,
+                qrHash: t.qrHash,
+                ticketUrl: `${siteBase}/ticket/${t.ticketNumber}`,
+                qrDataUrl: `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(
+                  JSON.stringify({
+                    code: t.ticketNumber,
+                    hash: t.qrHash,
+                    event: "HALLOWEEN_RIFT_2026",
+                    admits: t.admitsCount,
+                  }),
+                )}`,
+              })),
+            },
+          },
+          `ticket-confirmation:${compOrder.id}`,
+        );
+        emailDelivery = {
+          status: outboxRecord.status,
+          providerStatus: outboxRecord.providerStatus || "unknown",
+          ...(outboxRecord.providerMessageId
+            ? { providerMessageId: outboxRecord.providerMessageId }
+            : {}),
+          ...(outboxRecord.lastError ? { lastError: outboxRecord.lastError } : {}),
+        };
+      } catch (err) {
+        emailDelivery = {
+          status: "enqueue_failed",
+          providerStatus: "not_attempted",
+          lastError: err instanceof Error ? err.message : "Email could not be queued.",
+        };
+      }
+    }
+
+    return {
+      success: true,
+      message: `Issued ${issuedTickets.length} complimentary ${ticketTier.name} pass(es) (${issuedTickets.map((t) => t.ticketNumber).join(", ")}).`,
+      order: created.order,
+      tickets: issuedTickets,
+      emailDelivery,
+    };
+  }
+
+  /**
+   * Get Affiliate Referral Leaderboard
+   */
+  static async getAffiliateLeaderboard() {
+    const affiliates = await OrderService.getAffiliateReferralStats();
+    const totalReferredPeople = affiliates.reduce((sum, a) => sum + a.admittedPeople, 0);
+    const totalPendingPeople = affiliates.reduce((sum, a) => sum + a.pendingPeople, 0);
+    const totalReferredRevenueKes = affiliates.reduce((sum, a) => sum + a.totalRevenueKes, 0);
+    const totalCommissionKes = affiliates.reduce((sum, a) => sum + a.commissionKes, 0);
+    const totalCompsEarned = affiliates.reduce((sum, a) => sum + a.compsEarned, 0);
+    const totalCompsIssued = affiliates.reduce((sum, a) => sum + a.compsIssued, 0);
+    const totalCompsOutstanding = affiliates.reduce((sum, a) => sum + a.compsOutstanding, 0);
+    return {
+      terms: AFFILIATE_TERMS,
+      affiliates,
+      summary: {
+        activeAffiliatesCount: affiliates.length,
+        totalReferredPeople,
+        totalPendingPeople,
+        totalReferredRevenueKes,
+        totalCommissionKes,
+        totalCommissionDueKes: totalCommissionKes,
+        totalCompsEarned,
+        totalCompsIssued,
+        totalCompsOutstanding,
+      },
     };
   }
 

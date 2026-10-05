@@ -275,6 +275,88 @@ export class ManualOrderStore {
     return result.rows.map(orderFromRow);
   }
 
+  static async createCompOrderAndTickets(
+    order: StoredOrder,
+    reservationId: string,
+    ticket: TicketTypeConfig,
+    tickets: DigitalTicketRecord[],
+  ): Promise<{
+    order: StoredOrder;
+    tickets: DigitalTicketRecord[];
+    inventoryError: boolean;
+    duplicate?: boolean;
+  }> {
+    return withTransaction(async (client) => {
+      await client.query("SELECT pg_advisory_xact_lock(hashtext('event_capacity'))");
+
+      if (order.idempotencyKey) {
+        const existingOrderRes = await client.query<{ data: StoredOrder }>(
+          "SELECT data FROM public.manual_ticket_orders WHERE idempotency_key = $1 FOR UPDATE",
+          [order.idempotencyKey],
+        );
+        const existingRow = existingOrderRes.rows[0];
+        if (existingRow) {
+          const existingOrder = orderFromRow(existingRow);
+          const existingTicketsRes = await client.query<{ data: DigitalTicketRecord }>(
+            "SELECT data FROM public.manual_ticket_records WHERE order_id = $1 ORDER BY ticket_number",
+            [existingOrder.id],
+          );
+          return {
+            order: existingOrder,
+            tickets: existingTicketsRes.rows.map((r) => r.data),
+            inventoryError: false,
+            duplicate: true,
+          };
+        }
+      }
+
+      const committed = await ManualOrderStore.getCommittedPeople(client);
+      const capacity = getEventCapacity();
+      if (committed + order.quantity * ticket.admitsCount > capacity) {
+        return { order, tickets: [], inventoryError: true };
+      }
+
+      await client.query(
+        `INSERT INTO public.manual_ticket_orders
+          (id, order_number, idempotency_key, ticket_type_id, quantity, status, expires_at, mpesa_code, data)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)`,
+        [
+          order.id,
+          order.orderNumber,
+          order.idempotencyKey || null,
+          order.ticketTypeId,
+          order.quantity,
+          order.status,
+          order.expiresAt,
+          order.mpesaCode || "COMP",
+          JSON.stringify(order),
+        ],
+      );
+
+      await client.query(
+        `INSERT INTO public.manual_ticket_reservations (id, order_id, ticket_type_id, quantity, expires_at, status)
+         VALUES ($1, $2, $3, $4, $5, 'completed')`,
+        [
+          reservationId,
+          order.id,
+          order.ticketTypeId,
+          order.quantity,
+          order.expiresAt,
+        ],
+      );
+
+      for (const ticketRecord of tickets) {
+        await client.query(
+          `INSERT INTO public.manual_ticket_records (ticket_number, order_id, status, data)
+           VALUES ($1, $2, $3, $4::jsonb)`,
+          [ticketRecord.ticketNumber, order.id, ticketRecord.status, JSON.stringify(ticketRecord)],
+        );
+      }
+
+      return { order, tickets, inventoryError: false };
+    });
+  }
+
   static async issueTickets(
     orderId: string,
     expectedStatus: string[],
@@ -330,6 +412,10 @@ export class ManualOrderStore {
       "SELECT data FROM public.manual_ticket_records ORDER BY created_at DESC",
     );
     return result.rows.map((row) => row.data);
+  }
+
+  static async listTickets(): Promise<DigitalTicketRecord[]> {
+    return this.getTickets();
   }
 
   static async getTicketsForBuyerEmail(email: string): Promise<DigitalTicketRecord[]> {

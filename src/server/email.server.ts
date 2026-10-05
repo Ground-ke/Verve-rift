@@ -256,6 +256,7 @@ export async function sendTicketConfirmationEmail(params: {
   orderNumber?: string;
   ticketCode?: string;
   totalKes?: number;
+  isComp?: boolean;
   ticketTier?: string;
   tierName?: string;
   quantity?: number;
@@ -376,11 +377,12 @@ export async function sendTicketConfirmationEmail(params: {
   }
 
   // 5. Generate Email HTML matching template
+  const isComplimentary = Boolean(params.isComp || total === 0);
   const emailHtml = generateBookingConfirmationEmailHtml({
     customer_name: name,
     ticket_tier: tier,
     quantity: qty,
-    total_amount: total.toLocaleString(),
+    total_amount: isComplimentary ? "Complimentary" : total.toLocaleString(),
     order_id: code,
     event_date: eventDate,
     ticket_url: primaryTicketUrl,

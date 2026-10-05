@@ -15,6 +15,10 @@ import {
   Calendar,
   Layers,
   ChevronDown,
+  Plus,
+  Users,
+  Link2,
+  Award,
 } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -74,6 +78,30 @@ interface AuditEntry {
   metadata: Record<string, unknown>;
 }
 
+export const AFFILIATE_TERMS = {
+  commissionPerPersonKes: 140,
+  peoplePerCompPass: 30,
+};
+
+export type CompReasonOption = "affiliate_milestone" | "performer_staff" | "sponsor" | "other";
+
+interface AffiliateStatRecord {
+  code: string;
+  approvedOrders: number;
+  admittedPeople: number;
+  peopleAdmitted?: number;
+  pendingOrders: number;
+  pendingPeople: number;
+  totalRevenueKes: number;
+  commissionPerPersonKes: number;
+  commissionKes: number;
+  totalPayoutKes: number;
+  compsEarned: number;
+  compsIssued: number;
+  compsOutstanding: number;
+  latestOrderAt: string;
+}
+
 export function TicketManagementTab() {
   const { user } = useAdminAuth();
 
@@ -122,6 +150,116 @@ export function TicketManagementTab() {
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
   const [updateFailed, setUpdateFailed] = useState<boolean>(false);
 
+  // Comp Ticket Issuance Modal State
+  const [isCompModalOpen, setIsCompModalOpen] = useState(false);
+  const [compTierSlug, setCompTierSlug] = useState("revenant");
+  const [compQuantity, setCompQuantity] = useState("1");
+  const [compAttendeeName, setCompAttendeeName] = useState("");
+  const [compBuyerEmail, setCompBuyerEmail] = useState("");
+  const [compBuyerPhone, setCompBuyerPhone] = useState("");
+  const [compReason, setCompReason] = useState<CompReasonOption>("performer_staff");
+  const [compNote, setCompNote] = useState("");
+  const [compForAffiliate, setCompForAffiliate] = useState("");
+  const [compIdempotencyKey, setCompIdempotencyKey] = useState("");
+  const [isIssuingComp, setIsIssuingComp] = useState(false);
+
+  useEffect(() => {
+    if (isCompModalOpen) {
+      const randomPart =
+        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+      setCompIdempotencyKey(`comp_${randomPart}`);
+    }
+  }, [isCompModalOpen]);
+
+  // Affiliate Referral Leaderboard State
+  const [affiliates, setAffiliates] = useState<AffiliateStatRecord[]>([]);
+  const [affiliateHandleInput, setAffiliateHandleInput] = useState("");
+
+  const fetchAffiliates = async () => {
+    try {
+      const res = await fetch("/api/admin/affiliates");
+      const data = await res.json();
+      if (res.ok && data.success && Array.isArray(data.affiliates)) {
+        setAffiliates(data.affiliates);
+      }
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const handleIssueCompPass = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!compAttendeeName.trim() || compAttendeeName.trim().length < 2) {
+      toast.error("Please enter a recipient full name (at least 2 characters).");
+      return;
+    }
+    const emailTrimmed = compBuyerEmail.trim().toLowerCase();
+    if (!emailTrimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrimmed)) {
+      toast.error("Please enter a valid recipient email address.");
+      return;
+    }
+    if (!compReason) {
+      toast.error("Please select a reason for issuing this complimentary pass.");
+      return;
+    }
+    const cleanAffiliate = compForAffiliate
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "_")
+      .replace(/[^a-z0-9_-]/g, "")
+      .slice(0, 32);
+    if (compReason === "affiliate_milestone" && !/^[a-z0-9_-]{2,32}$/.test(cleanAffiliate)) {
+      toast.error("Please enter a valid affiliate referral code for an affiliate milestone comp.");
+      return;
+    }
+    setIsIssuingComp(true);
+    try {
+      const res = await fetch("/api/admin/tickets/comp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tier_slug: compTierSlug,
+          quantity: parseInt(compQuantity, 10) || 1,
+          attendee_name: compAttendeeName.trim(),
+          buyer_email: emailTrimmed,
+          buyer_phone: compBuyerPhone.trim() || undefined,
+          comp_reason: compReason,
+          reason: compReason,
+          comp_note: compNote.trim() || undefined,
+          comp_for_affiliate: compReason === "affiliate_milestone" ? cleanAffiliate : undefined,
+          idempotency_key: compIdempotencyKey || undefined,
+          issued_by: user?.email || "admin@verve.co.ke",
+          actor_email: user?.email || "admin@verve.co.ke",
+          actor_id: user?.id,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        toast.error(data.message || "Failed to issue complimentary pass.");
+        return;
+      }
+      toast.success("Complimentary Pass Issued", {
+        description: data.message,
+      });
+      setIsCompModalOpen(false);
+      setCompAttendeeName("");
+      setCompBuyerEmail("");
+      setCompBuyerPhone("");
+      setCompReason("performer_staff");
+      setCompNote("");
+      setCompForAffiliate("");
+      setCompQuantity("1");
+      void fetchTickets();
+      void fetchAffiliates();
+    } catch {
+      toast.error("Network error while issuing complimentary pass.");
+    } finally {
+      setIsIssuingComp(false);
+    }
+  };
+
   // Load tickets from server API
   const fetchTickets = async () => {
     try {
@@ -162,10 +300,12 @@ export function TicketManagementTab() {
 
   useEffect(() => {
     void fetchTickets();
+    void fetchAffiliates();
 
     const interval = window.setInterval(() => {
       if (typeof document === "undefined" || document.visibilityState === "visible") {
         void fetchTickets();
+        void fetchAffiliates();
       }
     }, 60_000);
 
@@ -372,12 +512,24 @@ export function TicketManagementTab() {
             <Button
               variant="outline"
               size="sm"
-              onClick={fetchTickets}
+              onClick={() => {
+                void fetchTickets();
+                void fetchAffiliates();
+              }}
               disabled={isLoading}
               className="border-border text-lavender hover:text-bone text-xs h-10 px-3 shrink-0"
             >
               <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${isLoading ? "animate-spin" : ""}`} />
               Refresh Data
+            </Button>
+
+            <Button
+              size="sm"
+              onClick={() => setIsCompModalOpen(true)}
+              className="bg-oxblood text-bone hover:bg-oxblood/90 border border-amber-500/40 text-xs h-10 px-3.5 shrink-0 font-mono"
+            >
+              <Plus className="w-3.5 h-3.5 mr-1.5 text-amber-400" />
+              Issue Comp Pass
             </Button>
           </div>
         </div>
@@ -542,7 +694,17 @@ export function TicketManagementTab() {
 
                     {/* Price */}
                     <TableCell className="font-mono text-xs text-bone font-medium">
-                      KES {(ticket.priceKes ?? 0).toLocaleString()}
+                      <div className="flex items-center gap-1.5">
+                        <span>KES {(ticket.priceKes ?? 0).toLocaleString()}</span>
+                        {ticket.priceKes === 0 && (
+                          <Badge
+                            variant="outline"
+                            className="border-lavender/50 bg-lavender/10 text-lavender font-mono text-[9px] uppercase px-1.5 py-0"
+                          >
+                            COMP
+                          </Badge>
+                        )}
+                      </div>
                     </TableCell>
 
                     {/* Status */}
@@ -650,6 +812,298 @@ export function TicketManagementTab() {
           </TableBody>
         </Table>
       </div>
+
+      {/* Affiliate Referral Leaderboard & Link Generator */}
+      <div className="border border-border bg-card p-5 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/60 pb-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <Award className="w-5 h-5 text-amber-400" />
+              <h3 className="font-display text-lg text-bone tracking-wide">
+                Affiliate Referral Leaderboard &amp; Link Generator
+              </h3>
+            </div>
+            <p className="text-xs text-muted-foreground font-mono mt-1">
+              KES {AFFILIATE_TERMS.commissionPerPersonKes} commission per person admitted on verified orders · 1 free comp pass per {AFFILIATE_TERMS.peoplePerCompPass} people admitted
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Input
+              value={affiliateHandleInput}
+              onChange={(e) => setAffiliateHandleInput(e.target.value)}
+              placeholder="Affiliate handle (e.g. wanjiru or dj_asiti)"
+              className="bg-background border-border text-xs font-mono h-9 w-56"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-amber-500/40 text-amber-300 hover:text-bone text-xs font-mono h-9 shrink-0"
+              onClick={() => {
+                const clean = affiliateHandleInput
+                  .trim()
+                  .toLowerCase()
+                  .replace(/\s+/g, "_")
+                  .replace(/[^a-z0-9_-]/g, "")
+                  .slice(0, 32);
+                if (!/^[a-z0-9_-]{2,32}$/.test(clean)) {
+                  toast.error("Enter a valid handle (2–32 alphanumeric/underscore characters).");
+                  return;
+                }
+                const origin =
+                  typeof window !== "undefined" ? window.location.origin : "https://verve.co.ke";
+                const link = `${origin}/?ref=${clean}#tickets`;
+                handleCopy(link, `Referral link for ${clean}`);
+              }}
+            >
+              <Link2 className="w-3.5 h-3.5 mr-1.5" />
+              Copy Referral Link
+            </Button>
+          </div>
+        </div>
+
+        {affiliates.length === 0 ? (
+          <div className="py-6 text-center text-xs font-mono text-muted-foreground bg-background/40 border border-border/60 p-4">
+            No referred orders recorded yet. Share links like{" "}
+            <span className="text-amber-300">/?ref=wanjiru#tickets</span> or let buyers fill in{" "}
+            <span className="text-bone">&ldquo;Who invited you?&rdquo;</span> at checkout.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader className="bg-background/80">
+                <TableRow className="border-b border-border hover:bg-transparent">
+                  <TableHead className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+                    Affiliate Code
+                  </TableHead>
+                  <TableHead className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+                    People Admitted
+                  </TableHead>
+                  <TableHead className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+                    Pending People
+                  </TableHead>
+                  <TableHead className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+                    Commission
+                  </TableHead>
+                  <TableHead className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+                    Comps Earned
+                  </TableHead>
+                  <TableHead className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+                    Comps Issued
+                  </TableHead>
+                  <TableHead className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground text-right">
+                    Comps Outstanding
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {affiliates.map((aff, idx) => {
+                  const commission =
+                    aff.commissionKes ??
+                    aff.admittedPeople * AFFILIATE_TERMS.commissionPerPersonKes;
+                  const compsEarned =
+                    aff.compsEarned ??
+                    Math.floor(aff.admittedPeople / AFFILIATE_TERMS.peoplePerCompPass);
+                  const compsIssued = aff.compsIssued ?? 0;
+                  const compsOutstanding =
+                    aff.compsOutstanding ?? Math.max(0, compsEarned - compsIssued);
+
+                  return (
+                    <TableRow
+                      key={aff.code}
+                      className="border-b border-border/60 hover:bg-background/50"
+                    >
+                      <TableCell className="font-mono text-xs text-amber-400 font-bold">
+                        #{idx + 1} ?ref={aff.code}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-emerald-400 font-bold">
+                        {aff.admittedPeople}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">
+                        {aff.pendingPeople}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-amber-300 font-bold">
+                        KES {commission.toLocaleString()}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-bone">
+                        {compsEarned}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-bone">
+                        {compsIssued}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-bone font-bold text-right">
+                        {compsOutstanding}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </div>
+
+      {/* MODAL 0: Issue Complimentary (Comp) Pass */}
+      <Dialog open={isCompModalOpen} onOpenChange={setIsCompModalOpen}>
+        <DialogContent className="bg-card border-amber-500/40 text-bone max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-display text-xl text-bone flex items-center gap-2">
+              <Users className="w-5 h-5 text-amber-400" />
+              Issue Complimentary Pass (Comp)
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Generates a KES 0 valid cryptographic QR pass that reserves event capacity without
+              affecting paid M-Pesa revenue or affiliate commissions.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleIssueCompPass} className="space-y-3 my-2 text-xs">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider block mb-1">
+                  Pass Tier *
+                </label>
+                <Select value={compTierSlug} onValueChange={setCompTierSlug}>
+                  <SelectTrigger className="h-9 bg-background border-border text-xs text-bone">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-card border-border text-xs">
+                    <SelectItem value="revenant">Revenant (Admits 1)</SelectItem>
+                    <SelectItem value="soulbound">Soulbound (Admits 2)</SelectItem>
+                    <SelectItem value="coven">Coven (Admits 4)</SelectItem>
+                    <SelectItem value="outcasts">Outcasts (Admits 6)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <label className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider block mb-1">
+                  Quantity (1–10) *
+                </label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={10}
+                  value={compQuantity}
+                  onChange={(e) => setCompQuantity(e.target.value)}
+                  className="h-9 bg-background border-border text-xs font-mono text-bone"
+                  required
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider block mb-1">
+                Recipient Full Name *
+              </label>
+              <Input
+                value={compAttendeeName}
+                onChange={(e) => setCompAttendeeName(e.target.value)}
+                placeholder="e.g. DJ Asiti or Wanjiru"
+                className="bg-background border-border text-xs text-bone"
+                required
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider block mb-1">
+                  Recipient Email *
+                </label>
+                <Input
+                  type="email"
+                  value={compBuyerEmail}
+                  onChange={(e) => setCompBuyerEmail(e.target.value)}
+                  placeholder="guest@example.com"
+                  className="bg-background border-border text-xs font-mono text-bone"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider block mb-1">
+                  Kenyan Phone (Optional)
+                </label>
+                <Input
+                  type="tel"
+                  value={compBuyerPhone}
+                  onChange={(e) => setCompBuyerPhone(e.target.value)}
+                  placeholder="07XX XXX XXX"
+                  className="bg-background border-border text-xs font-mono text-bone"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider block mb-1">
+                Comp Reason *
+              </label>
+              <Select
+                value={compReason}
+                onValueChange={(val) => setCompReason(val as CompReasonOption)}
+              >
+                <SelectTrigger className="h-9 bg-background border-border text-xs text-bone">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-card border-border text-xs">
+                  <SelectItem value="affiliate_milestone">
+                    Affiliate Milestone (30+ Admitted Guests)
+                  </SelectItem>
+                  <SelectItem value="performer_staff">Performer / Staff</SelectItem>
+                  <SelectItem value="sponsor">Sponsor</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {compReason === "affiliate_milestone" && (
+              <div>
+                <label className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider block mb-1">
+                  Affiliate Referral Code *
+                </label>
+                <Input
+                  value={compForAffiliate}
+                  onChange={(e) => setCompForAffiliate(e.target.value)}
+                  placeholder="e.g. wanjiru"
+                  className="bg-background border-border text-xs font-mono text-bone"
+                  required
+                />
+              </div>
+            )}
+
+            <div>
+              <label className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider block mb-1">
+                Comp Note (Optional)
+              </label>
+              <Input
+                value={compNote}
+                onChange={(e) => setCompNote(e.target.value)}
+                placeholder="Optional note for audit trail"
+                className="bg-background border-border text-xs font-mono text-bone"
+              />
+            </div>
+
+            <DialogFooter className="gap-2 sm:gap-0 pt-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsCompModalOpen(false)}
+                className="text-xs text-muted-foreground hover:text-bone"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={isIssuingComp}
+                className="bg-oxblood hover:bg-oxblood/90 text-bone text-xs border border-amber-500/40 font-mono"
+              >
+                {isIssuingComp ? "Issuing Pass..." : "Issue Complimentary Pass"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* MODAL 1: Revoke / Invalidate Pass Confirmation */}
       <Dialog open={isRevokeModalOpen} onOpenChange={setIsRevokeModalOpen}>

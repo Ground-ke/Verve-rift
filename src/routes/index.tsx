@@ -328,6 +328,26 @@ function Index() {
   const eventJsonLd = generateEventJsonLd();
 
   useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const rawRef = params.get("ref");
+      if (rawRef) {
+        const sanitized = rawRef
+          .trim()
+          .toLowerCase()
+          .replace(/\s+/g, "_")
+          .replace(/[^a-z0-9_-]/g, "")
+          .slice(0, 32);
+        if (/^[a-z0-9_-]{2,32}$/.test(sanitized)) {
+          localStorage.setItem("rift_referral_code", sanitized);
+        }
+      }
+    } catch {
+      /* ignore storage errors */
+    }
+  }, []);
+
+  useEffect(() => {
     fetch("/api/promotions")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {

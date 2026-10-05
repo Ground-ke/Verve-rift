@@ -39,7 +39,17 @@ const searchSchema = z.object({
   ticket: z.string().optional().catch(undefined),
   orderId: z.string().optional().catch(undefined),
   token: z.string().optional().catch(undefined),
+  ref: z.string().optional().catch(undefined),
 });
+
+function normalizeReferralCode(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .replace(/[^a-z0-9_-]/g, "")
+    .slice(0, 32);
+}
 
 const mpesaPaymentDetails = {
   paybill: import.meta.env["VITE_MPESA_PAYBILL"]?.trim() || "",
@@ -122,7 +132,7 @@ const options: TicketOption[] = [
 ];
 
 function Checkout() {
-  const { ticket, orderId: routeOrderId, token: routeToken } = Route.useSearch();
+  const { ticket, orderId: routeOrderId, token: routeToken, ref: routeRef } = Route.useSearch();
   const navigate = useNavigate();
 
   // Normalize initial selection from URL
@@ -180,9 +190,51 @@ function Checkout() {
   const [buyerName, setBuyerName] = useState("");
   const [buyerPhone, setBuyerPhone] = useState("");
   const [buyerEmail, setBuyerEmail] = useState("");
+  const [referralCode, setReferralCode] = useState<string>(() => {
+    if (routeRef) {
+      const sanitized = normalizeReferralCode(routeRef);
+      if (/^[a-z0-9_-]{2,32}$/.test(sanitized)) return sanitized;
+    }
+    if (typeof window !== "undefined") {
+      try {
+        const urlRef = new URLSearchParams(window.location.search).get("ref");
+        if (urlRef) {
+          const sanitized = normalizeReferralCode(urlRef);
+          if (/^[a-z0-9_-]{2,32}$/.test(sanitized)) return sanitized;
+        }
+        const stored = localStorage.getItem("rift_referral_code");
+        if (stored) {
+          const sanitized = normalizeReferralCode(stored);
+          if (/^[a-z0-9_-]{2,32}$/.test(sanitized)) return sanitized;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    return "";
+  });
   const [nameTouched, setNameTouched] = useState(false);
   const [phoneTouched, setPhoneTouched] = useState(false);
   const [emailTouched, setEmailTouched] = useState(false);
+
+  useEffect(() => {
+    try {
+      const rawRef =
+        routeRef ||
+        (typeof window !== "undefined"
+          ? new URLSearchParams(window.location.search).get("ref")
+          : null);
+      if (rawRef) {
+        const sanitized = normalizeReferralCode(rawRef);
+        if (/^[a-z0-9_-]{2,32}$/.test(sanitized)) {
+          localStorage.setItem("rift_referral_code", sanitized);
+          setReferralCode((prev) => prev || sanitized);
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [routeRef]);
 
   // Reservation & Order State
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -401,6 +453,18 @@ function Checkout() {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
 
+      const normalizedRef = normalizeReferralCode(referralCode);
+      const validReferralCode = /^[a-z0-9_-]{2,32}$/.test(normalizedRef)
+        ? normalizedRef
+        : undefined;
+      if (validReferralCode) {
+        try {
+          localStorage.setItem("rift_referral_code", validReferralCode);
+        } catch {
+          /* ignore */
+        }
+      }
+
       let data: ClientOrderResponse | null = null;
       try {
         const response = await fetch("/api/orders/create", {
@@ -413,6 +477,9 @@ function Checkout() {
             buyer_phone: phoneValidation.normalized,
             buyer_email: buyerEmail.trim().toLowerCase(),
             idempotency_key: idempotencyKey,
+            ...(validReferralCode
+              ? { referralCode: validReferralCode, referral_code: validReferralCode }
+              : {}),
           }),
           signal: controller.signal,
         });
@@ -757,6 +824,24 @@ function Checkout() {
                   </div>
                 </div>
 
+                {/* Referral / Invite Input (Step 1) */}
+                <div className="mt-6 border border-border bg-card p-6">
+                  <Label htmlFor="referral-code-step1" className="text-bone font-medium">
+                    Who invited you? (Optional)
+                  </Label>
+                  <Input
+                    id="referral-code-step1"
+                    className="mt-2 h-11 bg-background border-border text-bone placeholder:text-muted-foreground focus:border-primary font-mono text-sm"
+                    placeholder="e.g. wanjiru or DJ Asiti"
+                    maxLength={32}
+                    value={referralCode}
+                    onChange={(e) => setReferralCode(e.target.value)}
+                  />
+                  <p className="mt-1.5 text-xs text-muted-foreground">
+                    If a friend, ambassador, or DJ shared a link or code with you, enter their handle here.
+                  </p>
+                </div>
+
                 <Button
                   variant="event"
                   size="xl"
@@ -876,6 +961,23 @@ function Checkout() {
                         dispatched to this inbox.
                       </p>
                     )}
+                  </div>
+
+                  <div>
+                    <Label htmlFor="referral-code" className="text-bone">
+                      Who invited you? (Optional)
+                    </Label>
+                    <Input
+                      id="referral-code"
+                      className="mt-2 h-12 bg-card border-border text-bone placeholder:text-muted-foreground focus:border-primary font-mono"
+                      placeholder="e.g. wanjiru or DJ Asiti"
+                      maxLength={32}
+                      value={referralCode}
+                      onChange={(e) => setReferralCode(e.target.value)}
+                    />
+                    <p className="mt-1.5 text-xs text-muted-foreground">
+                      Credit the ambassador, creator, or crew captain who invited you.
+                    </p>
                   </div>
 
                   <div className="border border-lavender/30 bg-lavender/5 p-4 text-sm text-bone-muted">

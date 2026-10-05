@@ -44,6 +44,12 @@ export function generateBookingConfirmationEmailHtml(params: {
     calendar_url,
   } = params;
 
+  const isComplimentary =
+    String(total_amount).trim().toLowerCase() === "complimentary" ||
+    String(total_amount).trim() === "0" ||
+    Number(total_amount) === 0;
+  const formattedTotalDisplay = isComplimentary ? "Complimentary" : `KES ${total_amount}`;
+
   // Primary action button targets either dedicated PDF view/download or the digital ticket pass
   const primaryButtonUrl = pdf_url || ticket_url;
 
@@ -53,7 +59,7 @@ export function generateBookingConfirmationEmailHtml(params: {
     `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(
       "Hauntings of the Rift",
     )}&dates=20261031/20261101&details=${encodeURIComponent(
-      `Event starts at 4 PM and runs till late.\nTicket reference: ${order_id}\nGuest: ${customer_name}\nTier: ${ticket_tier} (x${quantity})\nTotal: KES ${total_amount}\nVenue: ${venue_name}\nAge requirement: 18+.`,
+      `Event starts at 4 PM and runs till late.\nTicket reference: ${order_id}\nGuest: ${customer_name}\nTier: ${ticket_tier} (x${quantity})\nTotal: ${formattedTotalDisplay}\nVenue: ${venue_name}\nAge requirement: 18+.`,
     )}&location=${encodeURIComponent(
       "Top Cliff Lodge, Nakuru-Nairobi Highway, Free Area, Nakuru, Kenya",
     )}`;
@@ -168,7 +174,7 @@ export function generateBookingConfirmationEmailHtml(params: {
                 </div>
                 <div>
                   <span style="color: #6b7280; text-transform: uppercase; font-size: 10px;">Total Paid:</span>
-                  <strong style="color: #22c55e; margin-left: 4px;">KES ${total_amount}</strong>
+                  <strong style="color: #22c55e; margin-left: 4px;">${formattedTotalDisplay}</strong>
                 </div>
               </div>
 

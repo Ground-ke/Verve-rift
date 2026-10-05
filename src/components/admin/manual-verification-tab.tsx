@@ -49,6 +49,7 @@ export interface PendingOrderRecord {
   ticketName: string;
   quantity: number;
   totalKes: number;
+  referralCode?: string;
   mpesaCode?: string;
   mpesaMessage?: string;
   status: string;
@@ -139,6 +140,7 @@ export function ManualVerificationTab() {
         ticketName: String(o["ticketName"] || "General Admission"),
         quantity: Number(o["quantity"] || 1),
         totalKes: Number(o["totalKes"] || 0),
+        ...(o["referralCode"] ? { referralCode: String(o["referralCode"]) } : {}),
         ...(o["mpesaCode"] ? { mpesaCode: String(o["mpesaCode"]) } : {}),
         ...(o["mpesaMessage"] ? { mpesaMessage: String(o["mpesaMessage"]) } : {}),
         status: String(o["status"] || "pending") as PendingOrderRecord["status"],
@@ -224,6 +226,7 @@ export function ManualVerificationTab() {
         o.customerName.toLowerCase().includes(q) ||
         o.customerEmail.toLowerCase().includes(q) ||
         o.customerPhone.includes(q) ||
+        (o.referralCode && o.referralCode.toLowerCase().includes(q)) ||
         (o.mpesaCode && o.mpesaCode.toLowerCase().includes(q)),
     );
   }, [orders, searchQuery]);
@@ -565,6 +568,17 @@ export function ManualVerificationTab() {
                         {order.quantity}x {order.ticketName}
                       </span>
                     </div>
+                    {order.referralCode && (
+                      <div className="col-span-2 flex justify-between items-center pt-1">
+                        <span className="text-muted-foreground">Referred By:</span>
+                        <Badge
+                          variant="outline"
+                          className="border-amber-500/40 bg-amber-950/30 text-amber-300 font-mono text-[10px]"
+                        >
+                          ?ref={order.referralCode}
+                        </Badge>
+                      </div>
+                    )}
                   </div>
                 </div>
 
