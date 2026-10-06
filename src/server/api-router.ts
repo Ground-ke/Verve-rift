@@ -1,6 +1,7 @@
 import { OrderService } from "./order-service";
 import { TicketsServerService } from "./tickets.server";
 import { AdminServerService } from "./admin-service";
+import { AffiliateService } from "./affiliate-service";
 import { RefundService } from "./refund-service";
 import { PaymentOperationsStore } from "./payment-operations-store";
 import { NotificationOutbox } from "./notification-outbox";
@@ -967,17 +968,289 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     // 16a-2. GET /api/admin/affiliates (Affiliate Referral Leaderboard & Stats)
     // --------------------------------------------------------------------------
     if (pathname === "/api/admin/affiliates" && method === "GET") {
-      const data = await AdminServerService.getAffiliateLeaderboard();
-      return json({
-        success: true,
-        ...data,
-      });
+      try {
+        const data = await AffiliateService.listAffiliatesWithStats();
+        return json({
+          success: true,
+          ...data,
+        });
+      } catch {
+        const fallback = await AdminServerService.getAffiliateLeaderboard();
+        return json({
+          success: true,
+          ...fallback,
+        });
+      }
     }
 
     // --------------------------------------------------------------------------
-    // 16a-3. POST /api/affiliates/register (Public Affiliate Onboarding from /affiliate)
+    // 16a-2b. POST /api/admin/affiliates (Admin creates an affiliate)
     // --------------------------------------------------------------------------
-    if (pathname === "/api/affiliates/register" && method === "POST") {
+    if (pathname === "/api/admin/affiliates" && method === "POST") {
+      let body: Record<string, unknown>;
+      try {
+        body = (await request.json()) as Record<string, unknown>;
+      } catch {
+        return errorJson("Invalid JSON request body.", "INVALID_JSON", 400);
+      }
+
+      const actorEmail = String(
+        body["actor_email"] ||
+          body["actorEmail"] ||
+          request.headers.get("x-user-email") ||
+          apiRequestUserId ||
+          "admin@verve.co.ke",
+      );
+      const actorId = body["actor_id"] ? String(body["actor_id"]) : apiRequestUserId || undefined;
+
+      const result = await AffiliateService.createAffiliate({
+        name: String(body["name"] || ""),
+        phone: body["phone"] !== undefined && body["phone"] !== null ? String(body["phone"]) : null,
+        email: body["email"] !== undefined && body["email"] !== null ? String(body["email"]) : null,
+        code: body["code"] !== undefined && body["code"] !== null ? String(body["code"]) : null,
+        marketingConsent: Boolean(body["marketingConsent"] ?? body["marketing_consent"]),
+        notes: body["notes"] !== undefined && body["notes"] !== null ? String(body["notes"]) : null,
+        actorEmail,
+        actorId,
+      });
+
+      if (!result.success) {
+        return json(
+          { success: false, code: result.code, message: result.message },
+          result.status,
+        );
+      }
+
+      return json({ success: true, affiliate: result.affiliate }, 201);
+    }
+
+    // --------------------------------------------------------------------------
+    // 16a-2c. PATCH /api/admin/affiliates/:code (Admin updates affiliate)
+    // --------------------------------------------------------------------------
+    const adminAffiliatePatchMatch = pathname.match(/^\/api\/admin\/affiliates\/([^/]+)$/);
+    if (adminAffiliatePatchMatch && method === "PATCH") {
+      const targetCode = decodeURIComponent(adminAffiliatePatchMatch[1] || "");
+      let body: Record<string, unknown>;
+      try {
+        body = (await request.json()) as Record<string, unknown>;
+      } catch {
+        return errorJson("Invalid JSON request body.", "INVALID_JSON", 400);
+      }
+
+      const actorEmail = String(
+        body["actor_email"] ||
+          body["actorEmail"] ||
+          request.headers.get("x-user-email") ||
+          apiRequestUserId ||
+          "admin@verve.co.ke",
+      );
+      const actorId = body["actor_id"] ? String(body["actor_id"]) : apiRequestUserId || undefined;
+
+      const result = await AffiliateService.updateAffiliate(targetCode, {
+        code: body["code"] !== undefined ? String(body["code"]) : undefined,
+        name: body["name"] !== undefined ? String(body["name"]) : undefined,
+        phone:
+          body["phone"] !== undefined
+            ? body["phone"] === null
+              ? null
+              : String(body["phone"])
+            : undefined,
+        email:
+          body["email"] !== undefined
+            ? body["email"] === null
+              ? null
+              : String(body["email"])
+            : undefined,
+        notes:
+          body["notes"] !== undefined
+            ? body["notes"] === null
+              ? null
+              : String(body["notes"])
+            : undefined,
+        active: body["active"] !== undefined ? Boolean(body["active"]) : undefined,
+        marketingConsent:
+          body["marketingConsent"] !== undefined
+            ? Boolean(body["marketingConsent"])
+            : body["marketing_consent"] !== undefined
+              ? Boolean(body["marketing_consent"])
+              : undefined,
+        actorEmail,
+        actorId,
+      });
+
+      if (!result.success) {
+        return json(
+          { success: false, code: result.code, message: result.message },
+          result.status,
+        );
+      }
+
+      return json({ success: true, affiliate: result.affiliate }, 200);
+    }
+
+    // --------------------------------------------------------------------------
+    // 16a-2d. POST /api/admin/affiliates/:code/payouts (Admin records M-Pesa payout)
+    // --------------------------------------------------------------------------
+    const adminAffiliatePayoutMatch = pathname.match(
+      /^\/api\/admin\/affiliates\/([^/]+)\/payouts$/,
+    );
+    if (adminAffiliatePayoutMatch && method === "POST") {
+      const targetCode = decodeURIComponent(adminAffiliatePayoutMatch[1] || "");
+      let body: Record<string, unknown>;
+      try {
+        body = (await request.json()) as Record<string, unknown>;
+      } catch {
+        return errorJson("Invalid JSON request body.", "INVALID_JSON", 400);
+      }
+
+      const actorEmail = String(
+        body["actor_email"] ||
+          body["actorEmail"] ||
+          request.headers.get("x-user-email") ||
+          apiRequestUserId ||
+          "admin@verve.co.ke",
+      );
+      const actorId = body["actor_id"] ? String(body["actor_id"]) : apiRequestUserId || undefined;
+
+      const result = await AffiliateService.recordPayout(targetCode, {
+        amountKes: Number(body["amountKes"] ?? body["amount_kes"]),
+        mpesaReference: String(body["mpesaReference"] ?? body["mpesa_reference"] ?? ""),
+        note: body["note"] !== undefined && body["note"] !== null ? String(body["note"]) : null,
+        confirmOverpay: Boolean(body["confirmOverpay"] ?? body["confirm_overpay"]),
+        actorEmail,
+        actorId,
+      });
+
+      if (!result.success) {
+        return json(
+          {
+            success: false,
+            code: result.code,
+            message: result.message,
+            ...(result.requiresConfirmation !== undefined
+              ? { requiresConfirmation: result.requiresConfirmation }
+              : {}),
+            ...(result.owedKes !== undefined ? { owedKes: result.owedKes } : {}),
+          },
+          result.status,
+        );
+      }
+
+      return json(
+        {
+          success: true,
+          payout: result.payout,
+          affiliate: result.affiliate,
+        },
+        201,
+      );
+    }
+
+    // --------------------------------------------------------------------------
+    // 16a-2e. POST /api/admin/affiliates/:code/approve (Admin approves application)
+    // --------------------------------------------------------------------------
+    const adminAffiliateApproveMatch = pathname.match(
+      /^\/api\/admin\/affiliates\/([^/]+)\/approve$/,
+    );
+    if (adminAffiliateApproveMatch && method === "POST") {
+      const targetCode = decodeURIComponent(adminAffiliateApproveMatch[1] || "");
+      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      const actorEmail = String(
+        body["actor_email"] ||
+          body["actorEmail"] ||
+          request.headers.get("x-user-email") ||
+          apiRequestUserId ||
+          "admin@verve.co.ke",
+      );
+      const actorId = body["actor_id"] ? String(body["actor_id"]) : apiRequestUserId || undefined;
+
+      const result = await AffiliateService.approveApplication(targetCode, actorEmail, actorId);
+      if (!result.success) {
+        return json(
+          { success: false, code: result.code, message: result.message },
+          result.status,
+        );
+      }
+      return json({ success: true, affiliate: result.affiliate }, 200);
+    }
+
+    // --------------------------------------------------------------------------
+    // 16a-2f. POST /api/admin/affiliates/:code/reject (Admin rejects application)
+    // --------------------------------------------------------------------------
+    const adminAffiliateRejectMatch = pathname.match(
+      /^\/api\/admin\/affiliates\/([^/]+)\/reject$/,
+    );
+    if (adminAffiliateRejectMatch && method === "POST") {
+      const targetCode = decodeURIComponent(adminAffiliateRejectMatch[1] || "");
+      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      const actorEmail = String(
+        body["actor_email"] ||
+          body["actorEmail"] ||
+          request.headers.get("x-user-email") ||
+          apiRequestUserId ||
+          "admin@verve.co.ke",
+      );
+      const actorId = body["actor_id"] ? String(body["actor_id"]) : apiRequestUserId || undefined;
+
+      const result = await AffiliateService.rejectApplication(targetCode, actorEmail, actorId);
+      if (!result.success) {
+        return json(
+          { success: false, code: result.code, message: result.message },
+          result.status,
+        );
+      }
+      return json({ success: true, affiliate: result.affiliate }, 200);
+    }
+
+    // --------------------------------------------------------------------------
+    // 16a-3. GET /api/affiliates/check (Rate-limited public handle availability check)
+    // --------------------------------------------------------------------------
+    if (pathname === "/api/affiliates/check" && method === "GET") {
+      const clientIp =
+        request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+        request.headers.get("x-real-ip") ||
+        "127.0.0.1";
+
+      const rateCheck = SlidingWindowRateLimiter.check(clientIp, "affiliate_check", {
+        windowMs: 60_000,
+        maxRequests: 40,
+      });
+      if (!rateCheck.allowed) {
+        return json({ available: false }, 429);
+      }
+
+      const rawCode = url.searchParams.get("code") || url.searchParams.get("handle") || "";
+      const result = await AffiliateService.checkHandleAvailability(rawCode);
+      return json({ available: result.available }, 200);
+    }
+
+    // --------------------------------------------------------------------------
+    // 16a-4. POST /api/affiliates/apply & POST /api/affiliates/register (Public Application)
+    // --------------------------------------------------------------------------
+    if (
+      (pathname === "/api/affiliates/apply" || pathname === "/api/affiliates/register") &&
+      method === "POST"
+    ) {
+      const clientIp =
+        request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+        request.headers.get("x-real-ip") ||
+        "127.0.0.1";
+
+      const ipRateCheck = SlidingWindowRateLimiter.check(clientIp, "affiliate_apply", {
+        windowMs: 3600_000,
+        maxRequests: 15,
+      });
+      if (!ipRateCheck.allowed) {
+        return json(
+          {
+            success: false,
+            code: "APPLICATIONS_BUSY",
+            message: "Applications are busy, try again later or message us on WhatsApp",
+          },
+          429,
+        );
+      }
+
       let body: Record<string, unknown>;
       try {
         body = (await request.json()) as Record<string, unknown>;
@@ -986,70 +1259,62 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       }
 
       const rawName = String(body["name"] || "").trim();
-      const rawCode = String(body["code"] || rawName)
-        .trim()
-        .toLowerCase()
-        .replace(/\s+/g, "_")
-        .replace(/[^a-z0-9_-]/g, "")
-        .replace(/^[_-]+|[_-]+$/g, "")
-        .slice(0, 32);
       const rawPhone = String(body["phone"] || "").trim();
-      const rawEmail = body["email"] ? String(body["email"]).trim().toLowerCase() : undefined;
+      const rawHandle = String(body["handle"] || body["code"] || rawName).trim();
+      const rawEmail =
+        body["email"] !== undefined && body["email"] !== null
+          ? String(body["email"]).trim()
+          : undefined;
+      const marketingConsent = Boolean(body["marketingConsent"] ?? body["marketing_consent"]);
+      const honeypot = String(
+        body["honeypot"] || body["website"] || body["company"] || "",
+      );
 
-      if (rawName.length < 2 || rawName.length > 80) {
-        return errorJson(
-          "Please enter your name or handle (2 to 80 characters).",
-          "INVALID_NAME",
-          400,
+      const appResult = await AffiliateService.submitApplication({
+        name: rawName,
+        phone: rawPhone,
+        handle: rawHandle,
+        email: rawEmail,
+        marketingConsent,
+        honeypot,
+      });
+
+      if (!appResult.success) {
+        return json(
+          {
+            success: false,
+            code: appResult.code,
+            message: appResult.message,
+          },
+          appResult.status,
         );
       }
-      if (!/^[a-z0-9_-]{2,32}$/.test(rawCode)) {
-        return errorJson(
-          "Referral code must be 2 to 32 letters, numbers, underscores, or hyphens.",
-          "INVALID_CODE",
-          400,
-        );
-      }
+
+      return json(
+        {
+          success: true,
+          code: appResult.code,
+        },
+        201,
+      );
+    }
+
+    // --------------------------------------------------------------------------
+    // 16a-5. POST /api/referrals/visit (Public referral visit ping)
+    // --------------------------------------------------------------------------
+    if (pathname === "/api/referrals/visit" && method === "POST") {
+      const clientIp =
+        request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+        request.headers.get("x-real-ip") ||
+        "127.0.0.1";
 
       try {
-        const { AffiliateService } = await import("./affiliate-service");
-        const created = await AffiliateService.createAffiliate({
-          name: rawName,
-          code: rawCode,
-          phone: rawPhone || undefined,
-          email: rawEmail || undefined,
-          marketingConsent: Boolean(body["marketingConsent"]),
-          notes: "Self-registered via /affiliate portal",
-          actorEmail: rawEmail || "self-service@verve.co.ke",
-        });
-
-        if (created.success) {
-          return json(
-            {
-              success: true,
-              code: created.affiliate.code,
-              name: created.affiliate.name,
-              phone: created.affiliate.phone,
-              message: `Affiliate code ?ref=${created.affiliate.code} is active and registered for weekly M-Pesa payouts.`,
-            },
-            201,
-          );
-        }
-
-        if (created.status === 400) {
-          return errorJson(created.message, created.code, 400);
-        }
+        const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+        await AffiliateService.recordVisit(body["code"], clientIp);
       } catch {
-        // Fallback when shared DB table is unavailable so onboarding never dead-ends
+        // Reveal nothing and never fail
       }
-
-      return json({
-        success: true,
-        code: rawCode,
-        name: rawName,
-        phone: rawPhone || null,
-        message: `Your referral code ?ref=${rawCode} is ready to use at checkout.`,
-      });
+      return new Response(null, { status: 204 });
     }
 
     // --------------------------------------------------------------------------

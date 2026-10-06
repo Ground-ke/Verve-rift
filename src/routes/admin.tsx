@@ -31,6 +31,7 @@ import { Badge } from "@/components/ui/badge";
 import { VerveIcon } from "@/components/brand/verve-logo";
 import { ProtectedAdminRoute } from "@/components/admin/protected-admin-route";
 import { TicketManagementTab } from "@/components/admin/ticket-management-tab";
+import { AffiliatesTab } from "@/components/admin/affiliates-tab";
 import { PromotionManagementTab } from "@/components/admin/promotion-management-tab";
 import { ScannerManagementTab } from "@/components/admin/scanner-management-tab";
 import { TicketTiersPricingTab } from "@/components/admin/ticket-tiers-pricing-tab";
@@ -114,6 +115,7 @@ function AdminDashboardContent() {
         const tab = params.get("tab");
         if (tab === "verifications" || tab === "verification") return "verifications";
         if (tab === "tickets") return "tickets";
+        if (tab === "affiliates") return "affiliates";
         if (tab === "promotions") return "promotions";
         if (tab === "scanners") return "scanners";
         if (tab === "tiers" || tab === "pricing") return "tiers";
@@ -281,6 +283,11 @@ function AdminDashboardContent() {
         text: `${metrics?.totalTicketsSold ?? 0} Sold`,
         variant: "green",
       },
+    },
+    {
+      id: "affiliates",
+      label: "Affiliates",
+      icon: Users,
     },
     {
       id: "promotions",
@@ -860,6 +867,9 @@ function AdminDashboardContent() {
 
           {/* TAB: TICKET MANAGEMENT */}
           {activeTab === "tickets" && <TicketManagementTab />}
+
+          {/* TAB: AFFILIATES */}
+          {activeTab === "affiliates" && <AffiliatesTab />}
 
           {/* TAB: NOTIFICATIONS */}
           {activeTab === "notifications" && <NotificationCenterTab />}

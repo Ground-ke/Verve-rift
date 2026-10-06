@@ -5,7 +5,24 @@ import { AFFILIATE_TERMS, normalizeReferralCode } from "./order-service";
 import { SlidingWindowRateLimiter } from "./rate-limiter";
 import { AdminServerService } from "./admin-service";
 
-const visitRateLimiter = new SlidingWindowRateLimiter(30, 60_000);
+export const RESERVED_AFFILIATE_HANDLES = new Set([
+  "asiti",
+  "rane",
+  "dj_asiti",
+  "dj_rane",
+  "verve",
+  "verve_co",
+  "serve",
+  "admin",
+  "staff",
+  "organizer",
+  "official",
+  "hauntings",
+  "rift",
+  "tickets",
+  "support",
+  "test",
+]);
 
 export interface AffiliateWithStats {
   code: string;
@@ -18,6 +35,9 @@ export interface AffiliateWithStats {
   notes: string | null;
   active: boolean;
   createdAt: string;
+  appliedAt: string | null;
+  approvedAt: string | null;
+  rejectedAt: string | null;
   visitsAllTime: number;
   visitsLast7Days: number;
   ordersStarted: number;
@@ -42,6 +62,7 @@ export interface AffiliateLeaderboardResponse {
   affiliates: AffiliateWithStats[];
   summary: {
     activeAffiliatesCount: number;
+    pendingApplicationsCount: number;
     totalAffiliatesCount: number;
     totalReferredPeople: number;
     totalPendingPeople: number;
@@ -75,15 +96,18 @@ async function writeAffiliateAuditLog(params: {
     | "affiliate.created"
     | "affiliate.updated"
     | "affiliate.deactivated"
-    | "affiliate.payout_recorded";
+    | "affiliate.payout_recorded"
+    | "affiliate.applied"
+    | "affiliate.approved"
+    | "affiliate.rejected";
   targetTable: "affiliates" | "affiliate_payouts";
   code: string;
-  changedFields: string[];
+  changedFields?: string[] | undefined;
 }): Promise<void> {
-  const metadata = {
-    code: params.code,
-    changedFields: params.changedFields,
-  };
+  const metadata =
+    params.changedFields && params.changedFields.length > 0
+      ? { code: params.code, changedFields: params.changedFields }
+      : { code: params.code };
   const auditId = randomUUID();
   const actorEmail = (params.actorEmail || "admin@verve.co.ke").trim();
   const actorId = (params.actorId || actorEmail).trim();
@@ -245,6 +269,9 @@ const AFFILIATE_STATS_SQL = `
     a.notes,
     a.active,
     a.created_at AS "createdAt",
+    a.applied_at AS "appliedAt",
+    a.approved_at AS "approvedAt",
+    a.rejected_at AS "rejectedAt",
     COALESCE(vs.visits_all_time, 0)::int AS "visitsAllTime",
     COALESCE(vs.visits_last_7d, 0)::int AS "visitsLast7Days",
     COALESCE(os.orders_started, 0)::int AS "ordersStarted",
@@ -279,6 +306,9 @@ interface RawAffiliateStatsRow {
   notes: string | null;
   active: boolean;
   createdAt: string;
+  appliedAt: string | null;
+  approvedAt: string | null;
+  rejectedAt: string | null;
   visitsAllTime: number;
   visitsLast7Days: number;
   ordersStarted: number;
@@ -315,6 +345,9 @@ function mapAffiliateRow(row: RawAffiliateStatsRow): AffiliateWithStats {
     notes: row.notes ?? null,
     active: Boolean(row.active),
     createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : new Date().toISOString(),
+    appliedAt: row.appliedAt ? new Date(row.appliedAt).toISOString() : null,
+    approvedAt: row.approvedAt ? new Date(row.approvedAt).toISOString() : null,
+    rejectedAt: row.rejectedAt ? new Date(row.rejectedAt).toISOString() : null,
     visitsAllTime,
     visitsLast7Days: Number(row.visitsLast7Days) || 0,
     ordersStarted: Number(row.ordersStarted) || 0,
@@ -343,12 +376,15 @@ export class AffiliateService {
   static async listAffiliatesWithStats(): Promise<AffiliateLeaderboardResponse> {
     const result = await getSharedPool().query<RawAffiliateStatsRow>(
       `${AFFILIATE_STATS_SQL}
-       ORDER BY "admittedPeople" DESC, "ordersStarted" DESC, a.created_at DESC`,
+       ORDER BY (a.applied_at IS NOT NULL AND a.approved_at IS NULL AND a.rejected_at IS NULL) DESC, "admittedPeople" DESC, "ordersStarted" DESC, a.created_at DESC`,
       [AFFILIATE_TERMS.commissionPerPersonKes, AFFILIATE_TERMS.peoplePerCompPass],
     );
 
     const affiliates = result.rows.map(mapAffiliateRow);
     const activeAffiliatesCount = affiliates.filter((a) => a.active).length;
+    const pendingApplicationsCount = affiliates.filter(
+      (a) => Boolean(a.appliedAt) && !a.approvedAt && !a.rejectedAt,
+    ).length;
     const totalReferredPeople = affiliates.reduce((sum, a) => sum + a.admittedPeople, 0);
     const totalPendingPeople = affiliates.reduce((sum, a) => sum + a.pendingPeople, 0);
     const totalReferredRevenueKes = affiliates.reduce((sum, a) => sum + a.totalRevenueKes, 0);
@@ -367,6 +403,7 @@ export class AffiliateService {
       affiliates,
       summary: {
         activeAffiliatesCount,
+        pendingApplicationsCount,
         totalAffiliatesCount: affiliates.length,
         totalReferredPeople,
         totalPendingPeople,
@@ -394,6 +431,342 @@ export class AffiliateService {
     );
     const row = result.rows[0];
     return row ? mapAffiliateRow(row) : null;
+  }
+
+  /**
+   * GET /api/affiliates/check?code=
+   * Checks whether a referral handle is available using the same normalization & reserved list.
+   * Reveals nothing about who owns a code.
+   */
+  static async checkHandleAvailability(rawCode: unknown): Promise<{ available: boolean }> {
+    const cleaned = typeof rawCode === "string"
+      ? rawCode
+          .trim()
+          .toLowerCase()
+          .replace(/\s+/g, "_")
+          .replace(/[^a-z0-9_-]/g, "")
+      : "";
+
+    if (!/^[a-z0-9_-]{2,32}$/.test(cleaned)) {
+      return { available: false };
+    }
+
+    if (RESERVED_AFFILIATE_HANDLES.has(cleaned)) {
+      return { available: false };
+    }
+
+    try {
+      const existing = await getSharedPool().query<{ exists: number }>(
+        "SELECT 1 AS exists FROM public.affiliates WHERE LOWER(code) = LOWER($1) LIMIT 1",
+        [cleaned],
+      );
+      return { available: existing.rows.length === 0 };
+    } catch {
+      return { available: true };
+    }
+  }
+
+  /**
+   * POST /api/affiliates/apply (and POST /api/affiliates/register)
+   * Public application endpoint: inserts with active=false, applied_at=now(), approved_at=null.
+   */
+  static async submitApplication(params: {
+    name: string;
+    phone: string;
+    handle: string;
+    email?: string | null | undefined;
+    marketingConsent?: boolean | undefined;
+    honeypot?: string | null | undefined;
+  }): Promise<
+    | { success: true; code: string }
+    | { success: false; status: 400 | 409 | 429 | 500; code: string; message: string }
+  > {
+    const cleanedHandle = (params.handle || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "_")
+      .replace(/[^a-z0-9_-]/g, "");
+
+    // Honeypot filled: return fake success and insert nothing
+    if (params.honeypot && String(params.honeypot).trim().length > 0) {
+      return {
+        success: true,
+        code: /^[a-z0-9_-]{2,32}$/.test(cleanedHandle) ? cleanedHandle : "member",
+      };
+    }
+
+    const trimmedName = (params.name || "").trim();
+    if (trimmedName.length < 2 || trimmedName.length > 80) {
+      return {
+        success: false,
+        status: 400,
+        code: "INVALID_NAME",
+        message: "Please enter your full name (2 to 80 characters).",
+      };
+    }
+
+    const rawPhone = (params.phone || "").trim();
+    const phoneCheck = validateAndNormalizeKenyanPhone(rawPhone);
+    if (!phoneCheck.isValid || !/^254[71]\d{8}$/.test(phoneCheck.normalized)) {
+      return {
+        success: false,
+        status: 400,
+        code: "INVALID_PHONE",
+        message:
+          phoneCheck.error ||
+          "Please enter a valid Kenyan M-Pesa number (07XXXXXXXX or 01XXXXXXXX).",
+      };
+    }
+    const normalizedPhone = phoneCheck.normalized;
+
+    let normalizedEmail: string | null = null;
+    if (params.email && params.email.trim()) {
+      const candidateEmail = params.email.trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidateEmail)) {
+        return {
+          success: false,
+          status: 400,
+          code: "INVALID_EMAIL",
+          message: "Please enter a valid email address.",
+        };
+      }
+      normalizedEmail = candidateEmail;
+    }
+
+    if (!/^[a-z0-9_-]{2,32}$/.test(cleanedHandle)) {
+      return {
+        success: false,
+        status: 400,
+        code: "INVALID_HANDLE",
+        message:
+          "Your handle must be 2 to 32 characters using lowercase letters, numbers, underscores, or hyphens.",
+      };
+    }
+
+    if (RESERVED_AFFILIATE_HANDLES.has(cleanedHandle)) {
+      return {
+        success: false,
+        status: 400,
+        code: "RESERVED_HANDLE",
+        message: "That handle is reserved. Please choose a different handle.",
+      };
+    }
+
+    const pool = getSharedPool();
+
+    // Rate / queue guard: > 20 applications in last hour OR > 100 pending
+    const queueRes = await pool.query<{ recent_count: number; pending_count: number }>(`
+      SELECT
+        COUNT(*) FILTER (WHERE applied_at >= NOW() - INTERVAL '1 hour')::int AS recent_count,
+        COUNT(*) FILTER (WHERE applied_at IS NOT NULL AND approved_at IS NULL AND rejected_at IS NULL)::int AS pending_count
+      FROM public.affiliates
+    `);
+    const recentCount = Number(queueRes.rows[0]?.recent_count) || 0;
+    const pendingCount = Number(queueRes.rows[0]?.pending_count) || 0;
+    if (recentCount > 20 || pendingCount > 100) {
+      return {
+        success: false,
+        status: 429,
+        code: "APPLICATIONS_BUSY",
+        message: "Applications are busy, try again later or message us on WhatsApp",
+      };
+    }
+
+    // Check duplicate phone or email first — never reveal the existing handle
+    const dupContactRes = await pool.query<{ exists: number }>(
+      normalizedEmail
+        ? "SELECT 1 AS exists FROM public.affiliates WHERE phone = $1 OR LOWER(email) = LOWER($2) LIMIT 1"
+        : "SELECT 1 AS exists FROM public.affiliates WHERE phone = $1 LIMIT 1",
+      normalizedEmail ? [normalizedPhone, normalizedEmail] : [normalizedPhone],
+    );
+    if (dupContactRes.rows.length > 0) {
+      return {
+        success: false,
+        status: 409,
+        code: "DUPLICATE_CONTACT",
+        message: "This number is already registered. Message us on WhatsApp to get your link.",
+      };
+    }
+
+    // Check taken handle
+    const dupHandleRes = await pool.query<{ exists: number }>(
+      "SELECT 1 AS exists FROM public.affiliates WHERE LOWER(code) = LOWER($1) LIMIT 1",
+      [cleanedHandle],
+    );
+    if (dupHandleRes.rows.length > 0) {
+      return {
+        success: false,
+        status: 409,
+        code: "HANDLE_TAKEN",
+        message: "That handle is already taken. Try adding numbers or your initials.",
+      };
+    }
+
+    const marketingConsent = Boolean(params.marketingConsent);
+
+    try {
+      await pool.query(
+        `INSERT INTO public.affiliates
+          (code, name, phone, email, marketing_consent, consent_at, unsubscribed_at, notes, active, created_at, applied_at, approved_at, rejected_at)
+         VALUES ($1, $2, $3, $4, $5, CASE WHEN $5 THEN NOW() ELSE NULL END, NULL, NULL, false, NOW(), NOW(), NULL, NULL)`,
+        [cleanedHandle, trimmedName, normalizedPhone, normalizedEmail, marketingConsent],
+      );
+    } catch (err) {
+      const pgErr = err as { code?: string; constraint?: string; detail?: string; message?: string };
+      if (pgErr?.code === "23505") {
+        const info = `${pgErr.constraint || ""} ${pgErr.detail || ""} ${pgErr.message || ""}`.toLowerCase();
+        if (info.includes("phone") || info.includes("email")) {
+          return {
+            success: false,
+            status: 409,
+            code: "DUPLICATE_CONTACT",
+            message: "This number is already registered. Message us on WhatsApp to get your link.",
+          };
+        }
+        return {
+          success: false,
+          status: 409,
+          code: "HANDLE_TAKEN",
+          message: "That handle is already taken. Try adding numbers or your initials.",
+        };
+      }
+      throw err;
+    }
+
+    await writeAffiliateAuditLog({
+      actorEmail: "public-application",
+      action: "affiliate.applied",
+      targetTable: "affiliates",
+      code: cleanedHandle,
+    });
+
+    return {
+      success: true,
+      code: cleanedHandle,
+    };
+  }
+
+  /**
+   * Approve a pending affiliate application (active=true, approved_at=now())
+   * Audit-logs only the code in metadata.
+   */
+  static async approveApplication(
+    targetCode: string,
+    actorEmail: string,
+    actorId?: string | undefined,
+  ): Promise<
+    | { success: true; affiliate: AffiliateWithStats }
+    | { success: false; status: 400 | 404 | 500; code: string; message: string }
+  > {
+    const cleanCode = (targetCode || "").trim().toLowerCase();
+    if (!cleanCode) {
+      return {
+        success: false,
+        status: 400,
+        code: "INVALID_CODE",
+        message: "Affiliate code is required.",
+      };
+    }
+
+    const pool = getSharedPool();
+    const res = await pool.query<{ code: string }>(
+      `UPDATE public.affiliates
+       SET active = true,
+           approved_at = NOW(),
+           rejected_at = NULL
+       WHERE LOWER(code) = LOWER($1)
+       RETURNING code`,
+      [cleanCode],
+    );
+    const updatedCode = res.rows[0]?.code;
+    if (!updatedCode) {
+      return {
+        success: false,
+        status: 404,
+        code: "NOT_FOUND",
+        message: "Affiliate application not found.",
+      };
+    }
+
+    await writeAffiliateAuditLog({
+      actorEmail,
+      actorId,
+      action: "affiliate.approved",
+      targetTable: "affiliates",
+      code: updatedCode,
+    });
+
+    const affiliate = await this.getAffiliateWithStatsByCode(updatedCode);
+    if (!affiliate) {
+      return {
+        success: false,
+        status: 500,
+        code: "FETCH_ERROR",
+        message: "Application approved, but record could not be loaded.",
+      };
+    }
+    return { success: true, affiliate };
+  }
+
+  /**
+   * Reject a pending affiliate application (rejected_at=now(), stays inactive)
+   * Audit-logs only the code in metadata.
+   */
+  static async rejectApplication(
+    targetCode: string,
+    actorEmail: string,
+    actorId?: string | undefined,
+  ): Promise<
+    | { success: true; affiliate: AffiliateWithStats }
+    | { success: false; status: 400 | 404 | 500; code: string; message: string }
+  > {
+    const cleanCode = (targetCode || "").trim().toLowerCase();
+    if (!cleanCode) {
+      return {
+        success: false,
+        status: 400,
+        code: "INVALID_CODE",
+        message: "Affiliate code is required.",
+      };
+    }
+
+    const pool = getSharedPool();
+    const res = await pool.query<{ code: string }>(
+      `UPDATE public.affiliates
+       SET active = false,
+           rejected_at = NOW()
+       WHERE LOWER(code) = LOWER($1)
+       RETURNING code`,
+      [cleanCode],
+    );
+    const updatedCode = res.rows[0]?.code;
+    if (!updatedCode) {
+      return {
+        success: false,
+        status: 404,
+        code: "NOT_FOUND",
+        message: "Affiliate application not found.",
+      };
+    }
+
+    await writeAffiliateAuditLog({
+      actorEmail,
+      actorId,
+      action: "affiliate.rejected",
+      targetTable: "affiliates",
+      code: updatedCode,
+    });
+
+    const affiliate = await this.getAffiliateWithStatsByCode(updatedCode);
+    if (!affiliate) {
+      return {
+        success: false,
+        status: 500,
+        code: "FETCH_ERROR",
+        message: "Application rejected, but record could not be loaded.",
+      };
+    }
+    return { success: true, affiliate };
   }
 
   /**
@@ -1030,7 +1403,11 @@ export class AffiliateService {
    * Always returns cleanly and stores no personal data.
    */
   static async recordVisit(rawCode: unknown, clientIp: string): Promise<void> {
-    if (!visitRateLimiter.check(`visit:${clientIp}`)) {
+    const rateCheck = SlidingWindowRateLimiter.check(clientIp, "referral_visit", {
+      windowMs: 60_000,
+      maxRequests: 30,
+    });
+    if (!rateCheck.allowed) {
       return;
     }
     const normalized = normalizeReferralCode(rawCode);

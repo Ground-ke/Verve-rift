@@ -1,20 +1,25 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
+  AlertTriangle,
   Award,
+  Check,
   CheckCircle2,
+  Clock,
   Copy,
+  Download,
   Edit3,
   ExternalLink,
   Link2,
   MessageSquare,
   Plus,
+  Power,
+  QrCode,
   RefreshCw,
   Search,
-  ShieldCheck,
   Ticket,
   Users,
   Wallet,
-  AlertTriangle,
+  XCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -62,6 +67,9 @@ export interface AffiliateRow {
   notes: string | null;
   active: boolean;
   createdAt: string;
+  appliedAt?: string | null;
+  approvedAt?: string | null;
+  rejectedAt?: string | null;
   visitsAllTime: number;
   visitsLast7Days: number;
   ordersStarted: number;
@@ -81,6 +89,7 @@ export interface AffiliateRow {
 
 interface AffiliatesSummary {
   activeAffiliatesCount: number;
+  pendingApplicationsCount?: number;
   totalAffiliatesCount: number;
   totalReferredPeople: number;
   totalPendingPeople: number;
@@ -100,12 +109,36 @@ function createIdempotencyKey(): string {
   return `comp-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function sanitizeCodePreview(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .replace(/[^a-z0-9_-]/g, "")
+    .replace(/^[_-]+|[_-]+$/g, "")
+    .slice(0, 32);
+}
+
+function escapeCsvCell(value: unknown): string {
+  const raw = value === null || value === undefined ? "" : String(value);
+  const formulaSafe = /^[=+\-@]/.test(raw) ? `'${raw}` : raw;
+  if (/[",\n\r]/.test(formulaSafe)) {
+    return `"${formulaSafe.replace(/"/g, '""')}"`;
+  }
+  return formulaSafe;
+}
+
+function isPendingApplication(aff: AffiliateRow): boolean {
+  return Boolean(aff.appliedAt) && !aff.approvedAt && !aff.rejectedAt && !aff.active;
+}
+
 export function AffiliatesTab() {
   const { user } = useAdminAuth();
   const [affiliates, setAffiliates] = useState<AffiliateRow[]>([]);
   const [terms, setTerms] = useState(DEFAULT_AFFILIATE_TERMS);
   const [summary, setSummary] = useState<AffiliatesSummary>({
     activeAffiliatesCount: 0,
+    pendingApplicationsCount: 0,
     totalAffiliatesCount: 0,
     totalReferredPeople: 0,
     totalPendingPeople: 0,
@@ -120,11 +153,15 @@ export function AffiliatesTab() {
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [processingCode, setProcessingCode] = useState<string | null>(null);
+  const [recentlyApprovedAffiliate, setRecentlyApprovedAffiliate] =
+    useState<AffiliateRow | null>(null);
 
   // Create Affiliate Modal State
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
   const [createCode, setCreateCode] = useState("");
+  const [createCodeTouched, setCreateCodeTouched] = useState(false);
   const [createPhone, setCreatePhone] = useState("");
   const [createEmail, setCreateEmail] = useState("");
   const [createNotes, setCreateNotes] = useState("");
@@ -186,21 +223,214 @@ export function AffiliatesTab() {
     void fetchAffiliates();
   }, []);
 
-  const getReferralLink = (code: string) => {
-    const origin =
-      typeof window !== "undefined" ? window.location.origin : "https://verve-rift.vercel.app";
-    return `${origin}/?ref=${code}#tickets`;
+  const getSiteOrigin = () =>
+    typeof window !== "undefined" ? window.location.origin : "https://verve-rift.vercel.app";
+
+  const getReferralLink = (code: string) => `${getSiteOrigin()}/?ref=${code}#tickets`;
+
+  const getWhatsAppShareUrl = (aff: AffiliateRow) => {
+    const link = getReferralLink(aff.code);
+    const text = `Hi ${aff.name}! Here is your official Hauntings of the Rift affiliate link: ${link}\n\nYou earn KES ${terms.commissionPerPersonKes} for every guest admitted plus 1 free pass for every ${terms.peoplePerCompPass} guests.`;
+    const cleanDigits = (aff.phone || "").replace(/\D/g, "");
+    return cleanDigits
+      ? `https://wa.me/${cleanDigits}?text=${encodeURIComponent(text)}`
+      : `https://wa.me/?text=${encodeURIComponent(text)}`;
   };
 
-  const getWhatsAppInviteText = (aff: AffiliateRow) => {
+  const getWeeklyMessage = (aff: AffiliateRow) => {
     const link = getReferralLink(aff.code);
-    return `Hey ${aff.name}! Here is your official Hauntings of the Rift referral link:\n${link}\n\n• You earn KES ${terms.commissionPerPersonKes} per person admitted on verified M-Pesa orders.\n• Every ${terms.peoplePerCompPass} people admitted unlocks 1 complimentary pass.\n• Guests can also type "${aff.code}" in "Who invited you?" at checkout.`;
+    return `Hi ${aff.name}, Hauntings of the Rift update: you have ${aff.admittedPeople} guests admitted (${aff.pendingPeople} pending), KES ${aff.commissionKes.toLocaleString()} earned (KES ${aff.paidKes.toLocaleString()} paid, KES ${aff.owedKes.toLocaleString()} owed), and ${aff.compsEarned} free pass(es) earned (${aff.compsOutstanding} to claim). Your link: ${link}`;
   };
 
   const handleCopy = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
     toast.success(`${label} copied to clipboard`);
   };
+
+  const handleDownloadQr = async (aff: AffiliateRow) => {
+    const link = getReferralLink(aff.code);
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=600x600&format=png&data=${encodeURIComponent(
+      link,
+    )}`;
+    try {
+      const response = await fetch(qrUrl);
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = `affiliate-qr-${aff.code}.png`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(objectUrl);
+      toast.success(`Downloaded QR for ?ref=${aff.code}`);
+    } catch {
+      toast.error("Could not download QR image.");
+    }
+  };
+
+  const handleExportCsv = () => {
+    const headers = [
+      "Name",
+      "Code",
+      "Status",
+      "Phone",
+      "Email",
+      "Marketing Consent",
+      "Visits All Time",
+      "Visits Last 7 Days",
+      "Orders Started",
+      "Approved Orders",
+      "People Admitted",
+      "Pending People",
+      "Conversion (%)",
+      "Commission Earned (KES)",
+      "Paid (KES)",
+      "Owed (KES)",
+      "Comps Earned",
+      "Comps Issued",
+      "Comps Outstanding",
+      "Notes",
+    ];
+
+    const rows = filteredAffiliates.map((aff) => {
+      const statusLabel = isPendingApplication(aff)
+        ? "pending"
+        : aff.rejectedAt && !aff.active
+          ? "rejected"
+          : aff.active
+            ? "active"
+            : "inactive";
+      return [
+        aff.name,
+        aff.code,
+        statusLabel,
+        aff.phone || "",
+        aff.email || "",
+        aff.marketingConsent ? "yes" : "no",
+        aff.visitsAllTime,
+        aff.visitsLast7Days,
+        aff.ordersStarted,
+        aff.approvedOrders,
+        aff.admittedPeople,
+        aff.pendingPeople,
+        aff.conversionRate,
+        aff.commissionKes,
+        aff.paidKes,
+        aff.owedKes,
+        aff.compsEarned,
+        aff.compsIssued,
+        aff.compsOutstanding,
+        aff.notes || "",
+      ]
+        .map(escapeCsvCell)
+        .join(",");
+    });
+
+    const csvContent = [headers.map(escapeCsvCell).join(","), ...rows].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `affiliates-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${filteredAffiliates.length} affiliate row(s) to CSV`);
+  };
+
+  const handleApproveApplication = async (aff: AffiliateRow) => {
+    setProcessingCode(aff.code);
+    try {
+      const res = await fetch(
+        `/api/admin/affiliates/${encodeURIComponent(aff.code)}/approve`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            actorEmail: user?.email || "admin@verve.co.ke",
+            actor_id: user?.id,
+          }),
+        },
+      );
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        toast.error(data.message || "Could not approve application.");
+        return;
+      }
+      setRecentlyApprovedAffiliate(data.affiliate || aff);
+      toast.success(`Approved ${aff.name} (?ref=${aff.code})`);
+      await fetchAffiliates();
+    } catch {
+      toast.error("Network error while approving application.");
+    } finally {
+      setProcessingCode(null);
+    }
+  };
+
+  const handleRejectApplication = async (aff: AffiliateRow) => {
+    setProcessingCode(aff.code);
+    try {
+      const res = await fetch(
+        `/api/admin/affiliates/${encodeURIComponent(aff.code)}/reject`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            actorEmail: user?.email || "admin@verve.co.ke",
+            actor_id: user?.id,
+          }),
+        },
+      );
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        toast.error(data.message || "Could not reject application.");
+        return;
+      }
+      toast.info(`Rejected application for ?ref=${aff.code}`);
+      await fetchAffiliates();
+    } catch {
+      toast.error("Network error while rejecting application.");
+    } finally {
+      setProcessingCode(null);
+    }
+  };
+
+  const handleToggleActive = async (aff: AffiliateRow) => {
+    setProcessingCode(aff.code);
+    try {
+      const res = await fetch(`/api/admin/affiliates/${encodeURIComponent(aff.code)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          active: !aff.active,
+          actorEmail: user?.email || "admin@verve.co.ke",
+          actor_id: user?.id,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        toast.error(data.message || "Could not update status.");
+        return;
+      }
+      toast.success(
+        `${aff.name} (?ref=${aff.code}) is now ${!aff.active ? "Active" : "Inactive"}`,
+      );
+      await fetchAffiliates();
+    } catch {
+      toast.error("Network error while toggling status.");
+    } finally {
+      setProcessingCode(null);
+    }
+  };
+
+  const pendingCount = useMemo(
+    () =>
+      summary.pendingApplicationsCount ??
+      affiliates.filter((a) => isPendingApplication(a)).length,
+    [affiliates, summary.pendingApplicationsCount],
+  );
 
   const filteredAffiliates = useMemo(() => {
     return affiliates.filter((aff) => {
@@ -214,6 +444,7 @@ export function AffiliatesTab() {
 
       if (!matchesSearch) return false;
 
+      if (statusFilter === "pending") return isPendingApplication(aff);
       if (statusFilter === "active") return aff.active;
       if (statusFilter === "inactive") return !aff.active;
       if (statusFilter === "owed") return aff.owedKes > 0;
@@ -226,12 +457,20 @@ export function AffiliatesTab() {
   const handleOpenCreate = () => {
     setCreateName("");
     setCreateCode("");
+    setCreateCodeTouched(false);
     setCreatePhone("");
     setCreateEmail("");
     setCreateNotes("");
     setCreateMarketingConsent(false);
     setCreateError(null);
     setIsCreateOpen(true);
+  };
+
+  const handleCreateNameChange = (value: string) => {
+    setCreateName(value);
+    if (!createCodeTouched) {
+      setCreateCode(sanitizeCodePreview(value));
+    }
   };
 
   const handleCreateSubmit = async (e: React.FormEvent) => {
@@ -443,8 +682,68 @@ export function AffiliatesTab() {
     }
   };
 
+  const previewNewCode = sanitizeCodePreview(createCode || createName) || "handle";
+
   return (
     <div className="space-y-6">
+      {/* Recently Approved WhatsApp Prompt */}
+      {recentlyApprovedAffiliate && (
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border border-emerald-500/50 bg-emerald-950/30 p-4">
+          <div className="space-y-0.5">
+            <p className="text-sm font-medium text-emerald-300">
+              Approved {recentlyApprovedAffiliate.name} (?ref={recentlyApprovedAffiliate.code})
+            </p>
+            <p className="text-xs font-mono text-bone-muted">
+              Send them their active referral link on WhatsApp so they know they are approved.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <a
+              href={getWhatsAppShareUrl(recentlyApprovedAffiliate)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/50 text-emerald-200 px-3 py-1.5 text-xs font-mono"
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              Message on WhatsApp
+            </a>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setRecentlyApprovedAffiliate(null)}
+              className="text-xs text-muted-foreground hover:text-bone h-8"
+            >
+              Dismiss
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Pending Applications Banner */}
+      {pendingCount > 0 && (
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border border-amber-500/50 bg-amber-950/30 p-4">
+          <div className="flex items-center gap-3">
+            <Clock className="w-5 h-5 text-amber-400 shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-amber-200">
+                {pendingCount} Pending Affiliate Application{pendingCount === 1 ? "" : "s"}
+              </p>
+              <p className="text-xs font-mono text-bone-muted">
+                Review and approve applicants so their link visits and M-Pesa payouts are activated.
+              </p>
+            </div>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setStatusFilter(statusFilter === "pending" ? "all" : "pending")}
+            className="border-amber-500/50 text-amber-300 hover:text-bone text-xs font-mono"
+          >
+            {statusFilter === "pending" ? "Show All Affiliates" : `Review Pending (${pendingCount})`}
+          </Button>
+        </div>
+      )}
+
       {/* Summary KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
         <div className="border border-border bg-card p-4 space-y-1">
@@ -456,14 +755,16 @@ export function AffiliatesTab() {
             {summary.activeAffiliatesCount} / {summary.totalAffiliatesCount}
           </div>
           <p className="text-[11px] text-muted-foreground font-mono">
-            KES {terms.commissionPerPersonKes}/person · 1 comp/{terms.peoplePerCompPass} people
+            {pendingCount > 0
+              ? `${pendingCount} pending application${pendingCount === 1 ? "" : "s"}`
+              : `KES ${terms.commissionPerPersonKes}/person · 1 comp/${terms.peoplePerCompPass} people`}
           </p>
         </div>
 
         <div className="border border-emerald-500/30 bg-card p-4 space-y-1">
           <div className="flex items-center justify-between text-emerald-400">
             <span className="text-xs font-mono uppercase tracking-wider">
-              Referred Guests Admitted
+              People Admitted via Affiliates
             </span>
             <CheckCircle2 className="w-4 h-4 text-emerald-400" />
           </div>
@@ -479,7 +780,7 @@ export function AffiliatesTab() {
         <div className="border border-amber-500/30 bg-card p-4 space-y-1">
           <div className="flex items-center justify-between text-amber-400">
             <span className="text-xs font-mono uppercase tracking-wider">
-              Commission Balance Owed
+              Total Commission Owed
             </span>
             <Wallet className="w-4 h-4 text-amber-400" />
           </div>
@@ -494,9 +795,7 @@ export function AffiliatesTab() {
 
         <div className="border border-lavender/30 bg-card p-4 space-y-1">
           <div className="flex items-center justify-between text-lavender">
-            <span className="text-xs font-mono uppercase tracking-wider">
-              Milestone Comp Passes
-            </span>
+            <span className="text-xs font-mono uppercase tracking-wider">Comps Outstanding</span>
             <Ticket className="w-4 h-4 text-lavender" />
           </div>
           <div className="font-display text-2xl text-bone">
@@ -523,17 +822,29 @@ export function AffiliatesTab() {
 
           <div className="flex flex-wrap items-center gap-2 shrink-0">
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="h-10 w-44 bg-background border-border text-xs font-mono text-bone">
+              <SelectTrigger className="h-10 w-48 bg-background border-border text-xs font-mono text-bone">
                 <SelectValue placeholder="Filter Affiliates" />
               </SelectTrigger>
               <SelectContent className="bg-card border-border text-xs font-mono">
                 <SelectItem value="all">All Affiliates ({affiliates.length})</SelectItem>
+                <SelectItem value="pending">Pending Applications ({pendingCount})</SelectItem>
                 <SelectItem value="active">Active Only</SelectItem>
                 <SelectItem value="inactive">Inactive Only</SelectItem>
                 <SelectItem value="owed">Balance Owed &gt; 0</SelectItem>
                 <SelectItem value="comps_due">Comps Outstanding &gt; 0</SelectItem>
               </SelectContent>
             </Select>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExportCsv}
+              disabled={filteredAffiliates.length === 0}
+              className="border-border text-lavender hover:text-bone text-xs h-10 px-3 font-mono"
+            >
+              <Download className="w-3.5 h-3.5 mr-1.5" />
+              Export CSV
+            </Button>
 
             <Button
               variant="outline"
@@ -552,7 +863,7 @@ export function AffiliatesTab() {
               className="bg-oxblood text-bone hover:bg-oxblood/90 border border-amber-500/40 text-xs h-10 px-3.5 font-mono"
             >
               <Plus className="w-3.5 h-3.5 mr-1.5 text-amber-400" />
-              Add Affiliate
+              Add affiliate
             </Button>
           </div>
         </div>
@@ -564,22 +875,22 @@ export function AffiliatesTab() {
           <TableHeader className="bg-background/80">
             <TableRow className="border-b border-border hover:bg-transparent">
               <TableHead className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground py-3">
-                Affiliate &amp; Code
+                Name &amp; Code
               </TableHead>
               <TableHead className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-                Contact &amp; Consent
+                Status &amp; Contact
               </TableHead>
               <TableHead className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-                Visits &amp; Funnel
+                Visits &amp; Conversion
               </TableHead>
               <TableHead className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-                People Admitted
+                Orders &amp; People Admitted
               </TableHead>
               <TableHead className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-                Commission (KES)
+                Commission / Paid / Owed
               </TableHead>
               <TableHead className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-                Comps (1/{terms.peoplePerCompPass})
+                Comps ({terms.peoplePerCompPass} guests)
               </TableHead>
               <TableHead className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground text-right">
                 Actions
@@ -608,178 +919,252 @@ export function AffiliatesTab() {
                   </div>
                   <p className="text-bone font-display text-sm">No Affiliates Found</p>
                   <p className="max-w-md mx-auto text-muted-foreground text-[11px]">
-                    Add ambassadors, DJs, or crew captains to generate personal{" "}
-                    <span className="text-amber-300">/?ref=code#tickets</span> links and track
-                    verified admissions, M-Pesa payouts, and milestone comp passes.
+                    Add affiliates or review public applications to manage personal{" "}
+                    <span className="text-amber-300">/?ref=code#tickets</span> links, M-Pesa
+                    payouts, and milestone comp passes.
                   </p>
                 </TableCell>
               </TableRow>
             ) : (
-              filteredAffiliates.map((aff) => (
-                <TableRow
-                  key={aff.code}
-                  className="border-b border-border/60 hover:bg-background/50 transition-colors"
-                >
-                  {/* Name & Code */}
-                  <TableCell className="py-3">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-xs text-bone">{aff.name}</span>
-                      {aff.active ? (
-                        <Badge
-                          variant="outline"
-                          className="border-emerald-500/40 bg-emerald-950/40 text-emerald-300 font-mono text-[9px] uppercase px-1.5 py-0"
+              filteredAffiliates.map((aff) => {
+                const isPending = isPendingApplication(aff);
+                const isRejected = Boolean(aff.rejectedAt) && !aff.active;
+                return (
+                  <TableRow
+                    key={aff.code}
+                    className="border-b border-border/60 hover:bg-background/50 transition-colors"
+                  >
+                    {/* Name & Code */}
+                    <TableCell className="py-3">
+                      <div className="font-medium text-xs text-bone">{aff.name}</div>
+                      <div className="flex items-center gap-1.5 mt-1 font-mono text-xs text-amber-400">
+                        <span>?ref={aff.code}</span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleCopy(getReferralLink(aff.code), `Link for ${aff.code}`)
+                          }
+                          className="text-muted-foreground hover:text-bone p-0.5"
+                          title="Copy link"
                         >
-                          Active
-                        </Badge>
-                      ) : (
-                        <Badge
-                          variant="outline"
-                          className="border-muted-foreground/40 bg-muted/20 text-muted-foreground font-mono text-[9px] uppercase px-1.5 py-0"
-                        >
-                          Inactive
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1.5 mt-1 font-mono text-xs text-amber-400">
-                      <span>?ref={aff.code}</span>
-                      <button
-                        type="button"
-                        onClick={() => handleCopy(getReferralLink(aff.code), `Link for ${aff.code}`)}
-                        className="text-muted-foreground hover:text-bone p-0.5"
-                        title="Copy referral link"
-                      >
-                        <Copy className="w-3 h-3" />
-                      </button>
-                    </div>
-                    {aff.notes && (
-                      <div className="text-[10px] text-muted-foreground font-mono mt-0.5 max-w-[200px] truncate">
-                        {aff.notes}
+                          <Copy className="w-3 h-3" />
+                        </button>
                       </div>
-                    )}
-                  </TableCell>
-
-                  {/* Contact & Consent */}
-                  <TableCell className="text-xs font-mono">
-                    <div className="text-bone">{aff.phone ? `+${aff.phone}` : "—"}</div>
-                    <div className="text-[11px] text-muted-foreground truncate max-w-[180px]">
-                      {aff.email || "—"}
-                    </div>
-                    <div className="mt-1">
-                      {aff.marketingConsent && !aff.unsubscribedAt ? (
-                        <span className="text-[10px] text-emerald-400">Opted in</span>
-                      ) : (
-                        <span className="text-[10px] text-muted-foreground">No email opt-in</span>
+                      {aff.notes && (
+                        <div className="text-[10px] text-muted-foreground font-mono mt-0.5 max-w-[200px] truncate">
+                          {aff.notes}
+                        </div>
                       )}
-                    </div>
-                  </TableCell>
+                    </TableCell>
 
-                  {/* Visits & Funnel */}
-                  <TableCell className="font-mono text-xs">
-                    <div className="text-bone">
-                      {aff.visitsAllTime} visits{" "}
-                      <span className="text-muted-foreground text-[10px]">
-                        ({aff.visitsLast7Days} in 7d)
-                      </span>
-                    </div>
-                    <div className="text-[11px] text-muted-foreground mt-0.5">
-                      {aff.approvedOrders} / {aff.ordersStarted} orders ({aff.conversionRate}% conv)
-                    </div>
-                  </TableCell>
+                    {/* Status & Contact */}
+                    <TableCell className="text-xs font-mono">
+                      <div className="mb-1 flex items-center gap-1.5">
+                        {isPending ? (
+                          <Badge
+                            variant="outline"
+                            className="border-amber-500/50 bg-amber-950/40 text-amber-300 font-mono text-[9px] uppercase px-1.5 py-0"
+                          >
+                            Pending Review
+                          </Badge>
+                        ) : isRejected ? (
+                          <Badge
+                            variant="outline"
+                            className="border-red-500/40 bg-red-950/30 text-red-300 font-mono text-[9px] uppercase px-1.5 py-0"
+                          >
+                            Rejected
+                          </Badge>
+                        ) : aff.active ? (
+                          <Badge
+                            variant="outline"
+                            className="border-emerald-500/40 bg-emerald-950/40 text-emerald-300 font-mono text-[9px] uppercase px-1.5 py-0"
+                          >
+                            Active
+                          </Badge>
+                        ) : (
+                          <Badge
+                            variant="outline"
+                            className="border-muted-foreground/40 bg-muted/20 text-muted-foreground font-mono text-[9px] uppercase px-1.5 py-0"
+                          >
+                            Inactive
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="text-bone">{aff.phone ? `+${aff.phone}` : "—"}</div>
+                      <div className="text-[11px] text-muted-foreground truncate max-w-[180px]">
+                        {aff.email || "—"}
+                      </div>
+                    </TableCell>
 
-                  {/* People Admitted */}
-                  <TableCell className="font-mono text-xs">
-                    <div className="text-emerald-400 font-bold text-sm">
-                      {aff.admittedPeople}{" "}
-                      <span className="text-[10px] font-normal text-muted-foreground">admitted</span>
-                    </div>
-                    <div className="text-[11px] text-amber-300/90">
-                      {aff.pendingPeople} pending
-                    </div>
-                  </TableCell>
+                    {/* Visits & Conversion */}
+                    <TableCell className="font-mono text-xs">
+                      <div className="text-bone">
+                        {aff.visitsAllTime} all-time{" "}
+                        <span className="text-muted-foreground text-[10px]">
+                          ({aff.visitsLast7Days} in 7d)
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-muted-foreground mt-0.5">
+                        Conversion: {aff.conversionRate}%
+                      </div>
+                    </TableCell>
 
-                  {/* Commission */}
-                  <TableCell className="font-mono text-xs">
-                    <div className="text-amber-300 font-bold">
-                      Owed: KES {aff.owedKes.toLocaleString()}
-                    </div>
-                    <div className="text-[10px] text-muted-foreground mt-0.5">
-                      Earned: KES {aff.commissionKes.toLocaleString()} · Paid: KES{" "}
-                      {aff.paidKes.toLocaleString()}
-                    </div>
-                  </TableCell>
+                    {/* Orders & People Admitted */}
+                    <TableCell className="font-mono text-xs">
+                      <div className="text-emerald-400 font-bold text-sm">
+                        {aff.admittedPeople} admitted{" "}
+                        <span className="text-[10px] font-normal text-amber-300/90">
+                          ({aff.pendingPeople} pending)
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-muted-foreground mt-0.5">
+                        {aff.approvedOrders} approved / {aff.ordersStarted} started
+                      </div>
+                    </TableCell>
 
-                  {/* Comps */}
-                  <TableCell className="font-mono text-xs">
-                    <div className="text-bone font-bold">
-                      {aff.compsOutstanding} due
-                    </div>
-                    <div className="text-[10px] text-muted-foreground mt-0.5">
-                      {aff.compsEarned} earned · {aff.compsIssued} issued
-                    </div>
-                  </TableCell>
+                    {/* Commission / Paid / Owed */}
+                    <TableCell className="font-mono text-xs">
+                      <div className="text-amber-300 font-bold">
+                        Owed: KES {aff.owedKes.toLocaleString()}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground mt-0.5">
+                        Earned: KES {aff.commissionKes.toLocaleString()} · Paid: KES{" "}
+                        {aff.paidKes.toLocaleString()}
+                      </div>
+                    </TableCell>
 
-                  {/* Actions */}
-                  <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() =>
-                          handleCopy(getReferralLink(aff.code), `Referral link for ${aff.name}`)
-                        }
-                        className="size-8 text-amber-400 hover:text-bone hover:bg-oxblood/30"
-                        title="Copy referral link"
-                      >
-                        <Link2 className="w-4 h-4" />
-                      </Button>
+                    {/* Comps */}
+                    <TableCell className="font-mono text-xs">
+                      <div className="text-bone font-bold">{aff.compsOutstanding} outstanding</div>
+                      <div className="text-[10px] text-muted-foreground mt-0.5">
+                        {aff.compsEarned} earned / {aff.compsIssued} issued
+                      </div>
+                    </TableCell>
 
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() =>
-                          handleCopy(getWhatsAppInviteText(aff), `WhatsApp message for ${aff.name}`)
-                        }
-                        className="size-8 text-emerald-400 hover:text-bone hover:bg-oxblood/30"
-                        title="Copy WhatsApp welcome message"
-                      >
-                        <MessageSquare className="w-4 h-4" />
-                      </Button>
+                    {/* Actions */}
+                    <TableCell className="text-right">
+                      <div className="flex flex-wrap items-center justify-end gap-1">
+                        {isPending && (
+                          <>
+                            <Button
+                              size="sm"
+                              onClick={() => void handleApproveApplication(aff)}
+                              disabled={processingCode === aff.code}
+                              className="h-7 px-2 text-[11px] font-mono bg-emerald-600 hover:bg-emerald-500 text-bone"
+                              title="Approve application"
+                            >
+                              <Check className="w-3 h-3 mr-1" />
+                              Approve
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => void handleRejectApplication(aff)}
+                              disabled={processingCode === aff.code}
+                              className="h-7 px-2 text-[11px] font-mono border-red-500/40 text-red-300 hover:text-bone"
+                              title="Reject application"
+                            >
+                              <XCircle className="w-3 h-3 mr-1" />
+                              Reject
+                            </Button>
+                          </>
+                        )}
 
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleOpenPayout(aff)}
-                        className="h-7 px-2 text-[11px] font-mono border-amber-500/40 text-amber-300 hover:text-bone"
-                        title="Record M-Pesa payout"
-                      >
-                        <Wallet className="w-3 h-3 mr-1" />
-                        Payout
-                      </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() =>
+                            handleCopy(getReferralLink(aff.code), `Link for ${aff.name}`)
+                          }
+                          className="size-8 text-amber-400 hover:text-bone hover:bg-oxblood/30"
+                          title="Copy link"
+                        >
+                          <Link2 className="w-4 h-4" />
+                        </Button>
 
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleOpenCompModal(aff)}
-                        className="h-7 px-2 text-[11px] font-mono border-lavender/40 text-lavender hover:text-bone"
-                        title="Issue milestone comp pass"
-                      >
-                        <Ticket className="w-3 h-3 mr-1" />
-                        Comp
-                      </Button>
+                        <a
+                          href={getWhatsAppShareUrl(aff)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex size-8 items-center justify-center text-emerald-400 hover:text-bone hover:bg-oxblood/30"
+                          title="Share on WhatsApp"
+                        >
+                          <ExternalLink className="w-4 h-4" />
+                        </a>
 
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() => handleOpenEdit(aff)}
-                        className="size-8 text-muted-foreground hover:text-bone hover:bg-oxblood/30"
-                        title="Edit affiliate details"
-                      >
-                        <Edit3 className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => void handleDownloadQr(aff)}
+                          className="size-8 text-bone-muted hover:text-bone hover:bg-oxblood/30"
+                          title="Download QR (PNG)"
+                        >
+                          <QrCode className="w-4 h-4" />
+                        </Button>
+
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() =>
+                            handleCopy(getWeeklyMessage(aff), `Weekly message for ${aff.name}`)
+                          }
+                          className="size-8 text-lavender hover:text-bone hover:bg-oxblood/30"
+                          title="Copy weekly message"
+                        >
+                          <MessageSquare className="w-4 h-4" />
+                        </Button>
+
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleOpenPayout(aff)}
+                          className="h-7 px-2 text-[11px] font-mono border-amber-500/40 text-amber-300 hover:text-bone"
+                          title="Record payout"
+                        >
+                          <Wallet className="w-3 h-3 mr-1" />
+                          Payout
+                        </Button>
+
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleOpenCompModal(aff)}
+                          className="h-7 px-2 text-[11px] font-mono border-lavender/40 text-lavender hover:text-bone"
+                          title="Issue comp"
+                        >
+                          <Ticket className="w-3 h-3 mr-1" />
+                          Issue comp
+                        </Button>
+
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => void handleToggleActive(aff)}
+                          disabled={processingCode === aff.code}
+                          className={`size-8 hover:bg-oxblood/30 ${
+                            aff.active
+                              ? "text-emerald-400 hover:text-red-300"
+                              : "text-muted-foreground hover:text-emerald-300"
+                          }`}
+                          title={aff.active ? "Deactivate affiliate" : "Activate affiliate"}
+                        >
+                          <Power className="w-4 h-4" />
+                        </Button>
+
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => handleOpenEdit(aff)}
+                          className="size-8 text-muted-foreground hover:text-bone hover:bg-oxblood/30"
+                          title="Edit affiliate"
+                        >
+                          <Edit3 className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })
             )}
           </TableBody>
         </Table>
@@ -791,10 +1176,10 @@ export function AffiliatesTab() {
           <DialogHeader>
             <DialogTitle className="font-display text-xl text-bone flex items-center gap-2">
               <Plus className="w-5 h-5 text-amber-400" />
-              Add Affiliate Partner
+              Add affiliate
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground font-mono">
-              Creates an official referral code and personal link. Earn rate: KES{" "}
+              Creates an active referral code and personal link. Earn rate: KES{" "}
               {terms.commissionPerPersonKes}/person admitted.
             </DialogDescription>
           </DialogHeader>
@@ -808,11 +1193,11 @@ export function AffiliatesTab() {
 
             <div>
               <label className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider block mb-1">
-                Full Name / Handle (2–80 chars) *
+                Name (2–80 chars) *
               </label>
               <Input
                 value={createName}
-                onChange={(e) => setCreateName(e.target.value)}
+                onChange={(e) => handleCreateNameChange(e.target.value)}
                 placeholder="e.g. Wanjiru or DJ Asiti"
                 className="bg-background border-border text-xs text-bone"
                 required
@@ -821,14 +1206,20 @@ export function AffiliatesTab() {
 
             <div>
               <label className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider block mb-1">
-                Referral Code (Optional — auto-generated from name if blank)
+                Code (Auto-filled from name, editable until saved)
               </label>
               <Input
                 value={createCode}
-                onChange={(e) => setCreateCode(e.target.value)}
+                onChange={(e) => {
+                  setCreateCodeTouched(true);
+                  setCreateCode(sanitizeCodePreview(e.target.value));
+                }}
                 placeholder="e.g. wanjiru or dj_asiti"
                 className="bg-background border-border text-xs font-mono text-bone"
               />
+              <p className="text-[11px] font-mono text-amber-300 mt-1 break-all">
+                Link preview: {getReferralLink(previewNewCode)}
+              </p>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -880,7 +1271,7 @@ export function AffiliatesTab() {
                 className="accent-amber-400"
               />
               <span className="text-xs text-muted-foreground font-mono">
-                Opted in to receive affiliate broadcast emails
+                This person agreed to receive event updates and affiliate program emails
               </span>
             </label>
 
@@ -1014,7 +1405,7 @@ export function AffiliatesTab() {
                   className="accent-amber-400"
                 />
                 <span className="text-xs text-muted-foreground font-mono">
-                  Opted in to affiliate email announcements
+                  This person agreed to receive event updates and affiliate program emails
                 </span>
               </label>
             </div>
