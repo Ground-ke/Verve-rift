@@ -50,6 +50,7 @@ export const DigitalTicket: React.FC<DigitalTicketProps> = ({ ticket }) => {
   const ticketRef = useRef<HTMLDivElement>(null);
 
   const isUsed = ticket.status === "used";
+  const isValid = ticket.status === "valid";
 
   const qrPayload = JSON.stringify({
     code: ticket.ticketNumber,

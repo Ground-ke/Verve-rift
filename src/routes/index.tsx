@@ -615,7 +615,7 @@ function Index() {
                   </p>
                 </div>
                 <Button asChild variant="event" size="xl">
-                  <Link to={`/checkout?promo=${encodeURIComponent(promotions[0].code)}`}>
+                  <Link to="/checkout" search={{ promo: promotions[0].code } as never}>
                     Claim offer <ArrowRight />
                   </Link>
                 </Button>
