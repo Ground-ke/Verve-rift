@@ -510,6 +510,7 @@ function Checkout() {
 
       // Update URL query parameters for session recovery without local storage
       navigate({
+        to: "/checkout",
         search: {
           ticket: choice.id,
           orderId: data.orderId,
@@ -650,6 +651,7 @@ function Checkout() {
     setMpesaInputError(null);
     setStep("select");
     navigate({
+      to: "/checkout",
       search: {
         ticket: choice.id,
       },

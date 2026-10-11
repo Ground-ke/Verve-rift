@@ -251,10 +251,11 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       });
 
       if (!result.success) {
+        const errCode = (result as { code?: string }).code;
         let status = 400;
-        if (result.code === "RATE_LIMITED") status = 429;
-        if (result.code === "TICKET_NOT_FOUND" || result.code === "EVENT_NOT_FOUND") status = 404;
-        if (result.code === "INSUFFICIENT_INVENTORY" || result.code === "IDEMPOTENCY_CONFLICT")
+        if (errCode === "RATE_LIMITED") status = 429;
+        if (errCode === "TICKET_NOT_FOUND" || errCode === "EVENT_NOT_FOUND") status = 404;
+        if (errCode === "INSUFFICIENT_INVENTORY" || errCode === "IDEMPOTENCY_CONFLICT")
           status = 409;
         return json(result, status);
       }
@@ -613,7 +614,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           venueAddress: ticket.venue.address,
         });
 
-        return new Response(pdfBuffer, {
+        return new Response(new Uint8Array(pdfBuffer), {
           status: 200,
           headers: {
             "Content-Type": "application/pdf",
@@ -653,7 +654,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           venueName: ticket.venue.name,
         });
 
-        return new Response(imageBuffer, {
+        return new Response(new Uint8Array(imageBuffer), {
           status: 200,
           headers: {
             "Content-Type": "image/jpeg",

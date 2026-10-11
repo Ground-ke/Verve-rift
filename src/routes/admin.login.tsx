@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { useAdminAuth } from "@/lib/auth/admin-auth-context";
 import { VerveIcon } from "@/components/brand/verve-logo";
@@ -34,6 +34,7 @@ export const Route = createFileRoute("/admin/login")({
 });
 
 function AdminLogin() {
+  const navigate = useNavigate();
   const { signInWithEmail, signInWithGoogle, signOut, user, isAuthenticated, isAdmin, isLoading } =
     useAdminAuth();
 
