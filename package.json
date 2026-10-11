@@ -92,7 +92,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.32.0",
-    "@lovable.dev/vite-tanstack-config": "^2.15.0",
+    "@lovable.dev/vite-tanstack-config": "2.25.3",
     "@types/node": "^22.16.5",
     "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.23.1",
