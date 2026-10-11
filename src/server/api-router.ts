@@ -654,7 +654,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           venueName: ticket.venue.name,
         });
 
-        return new Response(imageBuffer, {
+        return new Response(new Uint8Array(imageBuffer), {
           status: 200,
           headers: {
             "Content-Type": "image/jpeg",
